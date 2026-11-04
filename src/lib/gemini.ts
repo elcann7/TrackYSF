@@ -2,8 +2,12 @@ import type { FoodItem } from './db';
 import type { Lang } from './i18n';
 import { r1 } from './nutrition';
 
-/** Primary first; the next one is used when Google reports overload (503) or rate limits (429). */
-export const MODELS = ['gemini-3.1-flash-lite', 'gemini-3.5-flash-lite'] as const;
+/**
+ * Tried in order; the next one is used on overload (503), rate limits (429) or timeouts.
+ * 3.5 Flash-Lite goes first: in real tests (Nov 2026) 3.1 Flash-Lite often hung > 90 s or returned 503 on photos,
+ * while 3.5 answered. Both are on the free tier.
+ */
+export const MODELS = ['gemini-3.5-flash-lite', 'gemini-3.1-flash-lite'] as const;
 
 const ENDPOINT = 'https://generativelanguage.googleapis.com/v1beta/models';
 
@@ -106,7 +110,8 @@ async function callModel(model: string, input: AnalyzeInput, signal: AbortSignal
       }),
     });
   } catch (e) {
-    if ((e as Error).name === 'AbortError') throw new AnalyzeError('busy', 'timeout');
+    // iOS reports an aborted request as a generic network error, so check our own timeout signal first
+    if (signal.aborted || (e as Error).name === 'AbortError') throw new AnalyzeError('busy', 'timeout');
     throw new AnalyzeError('net', String(e));
   }
 
@@ -162,16 +167,21 @@ export async function analyzeMeal(input: AnalyzeInput): Promise<Analysis> {
     throw new AnalyzeError('generic', 'no input');
   }
   // Alternate models so an overloaded primary costs one short timeout, not a long wait.
-  const plan = [MODELS[0], MODELS[1], MODELS[0], MODELS[1]];
+  const plan = [MODELS[0], MODELS[1], MODELS[0]];
+  // photos take far longer than text (tested: ~35 s with an image on a busy day)
+  const timeouts = input.imageBase64 ? [60_000, 45_000, 60_000] : [25_000, 20_000, 30_000];
+  let netFailures = 0;
   let lastErr: AnalyzeError = new AnalyzeError('generic');
   for (let i = 0; i < plan.length; i++) {
     const ctrl = new AbortController();
-    const timer = setTimeout(() => ctrl.abort(), i < 2 ? 20_000 : 35_000);
+    const timer = setTimeout(() => ctrl.abort(), timeouts[i]);
     try {
       return await callModel(plan[i], input, ctrl.signal);
     } catch (e) {
       lastErr = e instanceof AnalyzeError ? e : new AnalyzeError('generic', String(e));
-      if (lastErr.code === 'key' || lastErr.code === 'net') throw lastErr;
+      if (lastErr.code === 'key') throw lastErr;
+      // a real connection error: retry once (mobile networks drop large uploads), then give up
+      if (lastErr.code === 'net' && ++netFailures >= 2) throw lastErr;
       if (i < plan.length - 1) await new Promise((r) => setTimeout(r, 600));
     } finally {
       clearTimeout(timer);

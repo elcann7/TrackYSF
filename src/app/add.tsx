@@ -37,7 +37,8 @@ interface Photo {
 }
 
 async function preparePhoto(uri: string): Promise<Photo> {
-  const big = await ImageManipulator.manipulate(uri).resize({ width: 1024, height: null }).renderAsync();
+  // 768 px is plenty to recognise food and keeps the upload + Gemini time short
+  const big = await ImageManipulator.manipulate(uri).resize({ width: 768, height: null }).renderAsync();
   const bigRes = await big.saveAsync({ format: SaveFormat.JPEG, compress: 0.72, base64: true });
   const small = await ImageManipulator.manipulate(uri).resize({ width: 160, height: null }).renderAsync();
   const smallRes = await small.saveAsync({ format: SaveFormat.JPEG, compress: 0.6, base64: true });
@@ -104,7 +105,7 @@ export default function AddFood() {
       haptic.error();
       const code = e instanceof AnalyzeError ? e.code : 'generic';
       const key: TKey = code === 'busy' ? 'errBusy' : code === 'rate' ? 'errRate' : code === 'key' ? 'errKey' : code === 'net' ? 'errNet' : 'errGeneric';
-      Alert.alert(t(key));
+      Alert.alert(t(key), e instanceof Error ? e.message.slice(0, 200) : undefined);
     } finally {
       setBusy(false);
     }
