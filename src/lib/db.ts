@@ -24,7 +24,7 @@ export interface WeightPoint {
   kg: number;
 }
 
-const SCHEMA_VERSION = 3;
+const SCHEMA_VERSION = 4;
 
 export async function migrate(db: SQLiteDatabase): Promise<void> {
   const row = await db.getFirstAsync<{ user_version: number }>('PRAGMA user_version');
@@ -70,7 +70,149 @@ export async function migrate(db: SQLiteDatabase): Promise<void> {
       CREATE INDEX IF NOT EXISTS idx_sets_ex ON workout_sets(ex_id);
     `);
   }
+  if (current < 4) {
+    await db.execAsync(`
+      CREATE TABLE IF NOT EXISTS water (date TEXT PRIMARY KEY NOT NULL, ml INTEGER NOT NULL);
+      CREATE TABLE IF NOT EXISTS cardio (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        date TEXT NOT NULL,
+        type TEXT NOT NULL,
+        minutes INTEGER NOT NULL,
+        kcal REAL NOT NULL,
+        created_at INTEGER NOT NULL
+      );
+      CREATE INDEX IF NOT EXISTS idx_cardio_date ON cardio(date);
+      CREATE TABLE IF NOT EXISTS favorites (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        name TEXT NOT NULL,
+        kcal REAL NOT NULL,
+        protein REAL NOT NULL,
+        carbs REAL NOT NULL,
+        fat REAL NOT NULL,
+        items TEXT NOT NULL DEFAULT '[]',
+        thumb TEXT,
+        created_at INTEGER NOT NULL
+      );
+    `);
+  }
   await db.execAsync(`PRAGMA user_version = ${SCHEMA_VERSION}`);
+}
+
+// ---------- water ----------
+export async function getWater(db: SQLiteDatabase, date: string): Promise<number> {
+  const r = await db.getFirstAsync<{ ml: number }>('SELECT ml FROM water WHERE date = ?', date);
+  return r?.ml ?? 0;
+}
+
+export async function setWater(db: SQLiteDatabase, date: string, ml: number): Promise<void> {
+  await db.runAsync(
+    'INSERT INTO water (date, ml) VALUES (?, ?) ON CONFLICT(date) DO UPDATE SET ml = excluded.ml',
+    date,
+    Math.max(0, Math.round(ml)),
+  );
+}
+
+// ---------- cardio ----------
+export interface CardioEntry {
+  id: number;
+  date: string;
+  type: string;
+  minutes: number;
+  kcal: number;
+}
+
+export async function cardioForDate(db: SQLiteDatabase, date: string): Promise<CardioEntry[]> {
+  return db.getAllAsync<CardioEntry>('SELECT id, date, type, minutes, kcal FROM cardio WHERE date = ? ORDER BY created_at', date);
+}
+
+export async function addCardio(db: SQLiteDatabase, c: Omit<CardioEntry, 'id'>): Promise<void> {
+  await db.runAsync(
+    'INSERT INTO cardio (date, type, minutes, kcal, created_at) VALUES (?, ?, ?, ?, ?)',
+    c.date,
+    c.type,
+    c.minutes,
+    c.kcal,
+    Date.now(),
+  );
+}
+
+export async function deleteCardio(db: SQLiteDatabase, id: number): Promise<void> {
+  await db.runAsync('DELETE FROM cardio WHERE id = ?', id);
+}
+
+// ---------- favorites (saved meals) ----------
+export interface Favorite extends Macros {
+  id: number;
+  name: string;
+  items: FoodItem[];
+  thumb: string | null;
+}
+
+export async function allFavorites(db: SQLiteDatabase): Promise<Favorite[]> {
+  const rows = await db.getAllAsync<Omit<Favorite, 'items'> & { items: string }>(
+    'SELECT id, name, kcal, protein, carbs, fat, items, thumb FROM favorites ORDER BY created_at DESC',
+  );
+  return rows.map((r) => ({ ...r, items: safeParse<FoodItem[]>(r.items, []) }));
+}
+
+export async function isFavorite(db: SQLiteDatabase, name: string): Promise<number | null> {
+  const r = await db.getFirstAsync<{ id: number }>('SELECT id FROM favorites WHERE lower(name) = lower(?)', name);
+  return r?.id ?? null;
+}
+
+export async function addFavorite(db: SQLiteDatabase, e: Omit<Favorite, 'id'>): Promise<void> {
+  await db.runAsync(
+    'INSERT INTO favorites (name, kcal, protein, carbs, fat, items, thumb, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)',
+    e.name,
+    e.kcal,
+    e.protein,
+    e.carbs,
+    e.fat,
+    JSON.stringify(e.items),
+    e.thumb,
+    Date.now(),
+  );
+}
+
+export async function deleteFavorite(db: SQLiteDatabase, id: number): Promise<void> {
+  await db.runAsync('DELETE FROM favorites WHERE id = ?', id);
+}
+
+/** Copy all entries of one meal from a date to another date. Returns how many were copied. */
+export async function copyMeal(db: SQLiteDatabase, from: string, to: string, meal: MealType): Promise<number> {
+  const src = (await entriesForDate(db, from)).filter((e) => e.meal === meal);
+  for (const e of src) {
+    await addEntry(db, { date: to, meal, name: e.name, kcal: e.kcal, protein: e.protein, carbs: e.carbs, fat: e.fat, items: e.items, thumb: e.thumb });
+  }
+  return src.length;
+}
+
+// ---------- backup ----------
+const BACKUP_TABLES = ['kv', 'entries', 'weights', 'my_foods', 'workouts', 'workout_sets', 'water', 'cardio', 'favorites'] as const;
+
+export async function exportAll(db: SQLiteDatabase): Promise<Record<string, unknown>> {
+  const out: Record<string, unknown> = { app: 'TrackYSF', schema: SCHEMA_VERSION, exportedAt: new Date().toISOString() };
+  for (const t of BACKUP_TABLES) out[t] = await db.getAllAsync(`SELECT * FROM ${t}`);
+  return out;
+}
+
+/** Replaces all data with a backup produced by exportAll. Column names are validated against the live schema. */
+export async function importAll(db: SQLiteDatabase, data: Record<string, unknown>): Promise<void> {
+  if (data.app !== 'TrackYSF') throw new Error('not a TrackYSF backup');
+  await db.withTransactionAsync(async () => {
+    for (const t of BACKUP_TABLES) {
+      const rows = data[t];
+      if (!Array.isArray(rows)) continue;
+      const cols = (await db.getAllAsync<{ name: string }>(`PRAGMA table_info(${t})`)).map((c) => c.name);
+      await db.runAsync(`DELETE FROM ${t}`);
+      for (const row of rows as Record<string, unknown>[]) {
+        const keys = Object.keys(row).filter((k) => cols.includes(k));
+        if (keys.length === 0) continue;
+        const values = keys.map((k) => row[k] as string | number | null);
+        await db.runAsync(`INSERT INTO ${t} (${keys.join(', ')}) VALUES (${keys.map(() => '?').join(', ')})`, values);
+      }
+    }
+  });
 }
 
 // ---------- workouts ----------
@@ -356,6 +498,6 @@ export async function deleteWeight(db: SQLiteDatabase, date: string): Promise<vo
 
 export async function eraseAll(db: SQLiteDatabase): Promise<void> {
   await db.execAsync(
-    'DELETE FROM entries; DELETE FROM weights; DELETE FROM kv; DELETE FROM my_foods; DELETE FROM workout_sets; DELETE FROM workouts;',
+    'DELETE FROM entries; DELETE FROM weights; DELETE FROM kv; DELETE FROM my_foods; DELETE FROM workout_sets; DELETE FROM workouts; DELETE FROM water; DELETE FROM cardio; DELETE FROM favorites;',
   );
 }

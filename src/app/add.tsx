@@ -18,7 +18,7 @@ import Animated, {
   withTiming,
 } from 'react-native-reanimated';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import { FoodPicker } from '@/components/FoodPicker';
+import { FoodPicker, type QuickItem } from '@/components/FoodPicker';
 import { Button, Card, Icon, PressableScale, Segmented, haptic } from '@/components/ui';
 import { MEALS, addEntry, type Entry, type FoodItem, type MealType } from '@/lib/db';
 import { mealForNow, todayKey } from '@/lib/dates';
@@ -138,7 +138,7 @@ export default function AddFood() {
     router.back();
   };
 
-  const quickAdd = async (e: Entry) => {
+  const quickAdd = async (e: QuickItem) => {
     await addEntry(db, { date, meal, name: e.name, kcal: e.kcal, protein: e.protein, carbs: e.carbs, fat: e.fat, items: e.items, thumb: e.thumb });
     haptic.success();
     bump();
@@ -168,7 +168,25 @@ export default function AddFood() {
 
         {/* ---------- PICK ---------- */}
         {mode === 'pick' && (
-          <Animated.View entering={FadeIn.duration(250)} exiting={FadeOut.duration(150)}>
+          <Animated.View entering={FadeIn.duration(250)} exiting={FadeOut.duration(150)} style={{ gap: space.lg }}>
+            {!apiKey && (
+              <Card style={styles.keyCard}>
+                <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
+                  <Icon name="key.fill" size={18} color={colors.accent} />
+                  <Text style={styles.keyTitle}>{t('noKeyTitle')}</Text>
+                </View>
+                <Text style={styles.hint}>{t('noKeyBody')}</Text>
+                <Button
+                  title={t('goToSettings')}
+                  variant="secondary"
+                  icon="gearshape"
+                  onPress={() => {
+                    router.dismissAll();
+                    router.navigate('/settings');
+                  }}
+                />
+              </Card>
+            )}
             <FoodPicker
               date={date}
               meal={meal}
@@ -374,6 +392,8 @@ const styles = StyleSheet.create({
   headerTitle: { color: colors.text, fontSize: 17, fontWeight: '700' },
   iconBtn: { width: 36, height: 36, borderRadius: 18, backgroundColor: colors.surfaceHigh, alignItems: 'center', justifyContent: 'center' },
   section: { color: colors.textFaint, fontSize: 12, fontWeight: '700', letterSpacing: 1, textTransform: 'uppercase' },
+  keyCard: { gap: space.md, borderColor: colors.accent, borderWidth: 1 },
+  keyTitle: { color: colors.text, fontSize: 16, fontWeight: '700' },
   hint: { color: colors.textDim, fontSize: 14, lineHeight: 20 },
   rowBorder: { borderTopWidth: StyleSheet.hairlineWidth, borderTopColor: colors.hairline },
   photoWrap: { borderRadius: radius.xl, overflow: 'hidden', backgroundColor: colors.surface },

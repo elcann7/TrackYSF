@@ -14,6 +14,18 @@ Personal iOS calorie & macro tracker. Snap a meal, optionally add what's inside 
 - **Adaptive TDEE**: after ~2 weeks of logging, real expenditure is measured from intake and the smoothed weight trend (energy balance) and can replace the formula.
 - **Training programs**: generated from days/week, session length, experience, age and equipment (gym / dumbbells / bodyweight). Full body → Upper/Lower → U/L+PPL → PPL ×2, each muscle ~2×/week, compounds first, RIR 1–3, rest 2–3 min for compounds. 40+ exercises with animated start/end images ([free-exercise-db](https://github.com/yuhonas/free-exercise-db), public domain) and AZ/EN technique cues.
 - **Workout logger**: sets/reps/kg, last session, double-progression suggestion, rest timer, history.
+- **Personalized programs**: training goal (muscle / strength / fitness), up to 3 weak-point muscles (trained first, +1 set, extra exercise), knee / lower-back / shoulder friendly swaps, weekly sets per muscle preview. Every exercise has common beginner mistakes, breathing cues and a form-video link.
+- **Barcode scanner** (Open Food Facts), **saved meals**, **copy a meal from yesterday**.
+- **Water** (≈35 ml/kg target) and **extra activity / cardio** (Compendium METs, net kcal added to the day's budget).
+- **Reminders** (meals, weigh-ins, workout days, water) and **JSON backup / restore**.
+
+## Gemini API key (free, bring your own)
+TrackYSF has no server and ships **no API key**. Each user adds their own free key:
+1. Open [Google AI Studio → API keys](https://aistudio.google.com/apikey) and sign in with Google.
+2. Create an API key.
+3. In the app: **Settings → Gemini API key**, paste, **Test key**.
+
+The key is stored only on the device (iOS Keychain). Free-tier limits apply (check them in AI Studio). Everything except AI analysis works without a key.
 - **Progress**: weight log (0.1 kg ruler), smoothed chart, weekly trend with guidance, 7-day calorie bars and averages.
 - **Settings**: AZ / EN interface, targets, profile, Gemini API key (stored in the iOS Keychain), erase data.
 - Everything is stored locally in SQLite. No server, no account.

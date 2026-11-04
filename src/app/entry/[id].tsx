@@ -4,7 +4,17 @@ import { useSQLiteContext } from 'expo-sqlite';
 import { useEffect, useState } from 'react';
 import { Alert, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { Button, Card, Segmented, haptic } from '@/components/ui';
-import { MEALS, deleteEntry, getEntry, moveEntry, type Entry, type MealType } from '@/lib/db';
+import {
+  MEALS,
+  addFavorite,
+  deleteEntry,
+  deleteFavorite,
+  getEntry,
+  isFavorite,
+  moveEntry,
+  type Entry,
+  type MealType,
+} from '@/lib/db';
 import { useApp } from '@/lib/store';
 import { colors, radius, space, type } from '@/theme';
 
@@ -13,12 +23,28 @@ export default function EntryDetail() {
   const db = useSQLiteContext();
   const { t, bump } = useApp();
   const [e, setE] = useState<Entry | null>(null);
+  const [favId, setFavId] = useState<number | null>(null);
 
   useEffect(() => {
-    getEntry(db, Number(id)).then(setE);
+    getEntry(db, Number(id)).then(async (x) => {
+      setE(x);
+      if (x) setFavId(await isFavorite(db, x.name));
+    });
   }, [db, id]);
 
   if (!e) return <View style={{ flex: 1, backgroundColor: colors.surface }} />;
+
+  const toggleFav = async () => {
+    if (favId != null) {
+      await deleteFavorite(db, favId);
+      setFavId(null);
+    } else {
+      await addFavorite(db, { name: e.name, kcal: e.kcal, protein: e.protein, carbs: e.carbs, fat: e.fat, items: e.items, thumb: e.thumb });
+      setFavId(await isFavorite(db, e.name));
+    }
+    haptic.success();
+    bump();
+  };
 
   const onMove = async (m: MealType) => {
     setE({ ...e, meal: m });
@@ -92,7 +118,14 @@ export default function EntryDetail() {
       <Text style={styles.section}>{t('moveTo')}</Text>
       <Segmented options={MEALS.map((m) => ({ value: m, label: t(m) }))} value={e.meal} onChange={onMove} />
 
-      <Button title={t('delete')} variant="danger" icon="trash" onPress={onDelete} style={{ marginTop: space.md }} />
+      <Button
+        title={favId != null ? t('removeFavorite') : t('saveFavorite')}
+        variant="secondary"
+        icon={favId != null ? 'star.slash' : 'star.fill'}
+        onPress={toggleFav}
+        style={{ marginTop: space.md }}
+      />
+      <Button title={t('delete')} variant="danger" icon="trash" onPress={onDelete} />
     </ScrollView>
   );
 }

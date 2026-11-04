@@ -1,12 +1,18 @@
+import * as DocumentPicker from 'expo-document-picker';
+import { File, Paths } from 'expo-file-system';
 import { router } from 'expo-router';
+import * as Sharing from 'expo-sharing';
 import { useSQLiteContext } from 'expo-sqlite';
 import { useEffect, useState } from 'react';
-import { Alert, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
+import { Alert, Linking, ScrollView, StyleSheet, Switch, Text, TextInput, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Button, Card, Segmented, haptic } from '@/components/ui';
-import { eraseAll } from '@/lib/db';
+import { eraseAll, exportAll, importAll, kvGet, kvSet } from '@/lib/db';
+import { todayKey } from '@/lib/dates';
 import { AnalyzeError, testKey } from '@/lib/gemini';
-import type { Lang } from '@/lib/i18n';
+import type { Lang, TKey } from '@/lib/i18n';
+import { DEFAULT_REMINDERS, applyReminders, ensurePermission, type ReminderSettings } from '@/lib/reminders';
+import type { Program } from '@/lib/training';
 import { computeTargets, type Targets } from '@/lib/nutrition';
 import { useApp } from '@/lib/store';
 import { colors, radius, space, type } from '@/theme';
@@ -14,7 +20,7 @@ import { colors, radius, space, type } from '@/theme';
 export default function Settings() {
   const insets = useSafeAreaInsets();
   const db = useSQLiteContext();
-  const { t, lang, setLang, targets, setTargets, profile, apiKey, setApiKey, resetState } = useApp();
+  const { t, lang, setLang, targets, setTargets, profile, apiKey, setApiKey, resetState, reload } = useApp();
   const [draft, setDraft] = useState<Targets | null>(targets);
   const [key, setKey] = useState(apiKey);
   const [testing, setTesting] = useState(false);
@@ -50,6 +56,69 @@ export default function Settings() {
     } finally {
       setTesting(false);
     }
+  };
+
+  // ----- reminders -----
+  const [rem, setRem] = useState<ReminderSettings>(DEFAULT_REMINDERS);
+  useEffect(() => {
+    kvGet<ReminderSettings>(db, 'reminders').then((r) => r && setRem({ ...DEFAULT_REMINDERS, ...r }));
+  }, [db]);
+
+  const toggleReminder = async (k: keyof ReminderSettings, v: boolean) => {
+    if (v && !(await ensurePermission())) {
+      Alert.alert(t('remDenied'));
+      return;
+    }
+    const next = { ...rem, [k]: v };
+    setRem(next);
+    haptic.select();
+    await kvSet(db, 'reminders', next);
+    const program = await kvGet<Program>(db, 'program');
+    await applyReminders(next, lang, program?.days.map((d) => d.weekday) ?? []);
+  };
+
+  // ----- backup -----
+  const doExport = async () => {
+    try {
+      const data = await exportAll(db);
+      const file = new File(Paths.cache, `TrackYSF-backup-${todayKey()}.json`);
+      if (file.exists) file.delete();
+      file.create();
+      file.write(JSON.stringify(data));
+      await Sharing.shareAsync(file.uri, { mimeType: 'application/json', UTI: 'public.json' });
+    } catch (e) {
+      Alert.alert(t('errGeneric'), String(e));
+    }
+  };
+
+  const doImport = async () => {
+    const res = await DocumentPicker.getDocumentAsync({ type: 'application/json', copyToCacheDirectory: true });
+    if (res.canceled || !res.assets?.[0]) return;
+    let data: Record<string, unknown>;
+    try {
+      data = JSON.parse(await new File(res.assets[0].uri).text());
+      if (data.app !== 'TrackYSF') throw new Error('bad');
+    } catch {
+      Alert.alert(t('importFail'));
+      return;
+    }
+    Alert.alert(t('importData'), t('importConfirm'), [
+      { text: t('cancel'), style: 'cancel' },
+      {
+        text: t('importData'),
+        style: 'destructive',
+        onPress: async () => {
+          try {
+            await importAll(db, data);
+            await reload();
+            haptic.success();
+            Alert.alert(t('importDone'));
+          } catch {
+            Alert.alert(t('importFail'));
+          }
+        },
+      },
+    ]);
   };
 
   const erase = () => {
@@ -105,6 +174,10 @@ export default function Settings() {
       )}
 
       <Section title={t('apiKey')}>
+        <Card style={{ gap: space.md }}>
+          <Text style={styles.howTo}>{t('keyHowTo')}</Text>
+          <Button title={t('getKey')} variant="secondary" icon="arrow.up.right.square" onPress={() => Linking.openURL('https://aistudio.google.com/apikey')} />
+        </Card>
         <TextInput
           value={key}
           onChangeText={setKey}
@@ -119,6 +192,23 @@ export default function Settings() {
         <Text style={styles.note}>
           {t('model')}: {t('modelNote')}
         </Text>
+      </Section>
+
+      <Section title={t('reminders')}>
+        <Card style={{ padding: 0 }}>
+          {(['meals', 'weighIn', 'workouts', 'water'] as (keyof ReminderSettings)[]).map((k, i) => (
+            <View key={k} style={[styles.row, i > 0 && styles.border]}>
+              <Text style={[styles.rowLabel, { fontSize: 15 }]}>{t(`rem_${k}` as TKey)}</Text>
+              <Switch value={rem[k]} onValueChange={(v) => toggleReminder(k, v)} trackColor={{ true: colors.accent, false: colors.surfaceHigher }} />
+            </View>
+          ))}
+        </Card>
+      </Section>
+
+      <Section title={t('backup')}>
+        <Button title={t('exportData')} variant="secondary" icon="square.and.arrow.up" onPress={doExport} />
+        <Button title={t('importData')} variant="secondary" icon="square.and.arrow.down" onPress={doImport} />
+        <Text style={styles.note}>{t('healthNote')}</Text>
       </Section>
 
       <Section title={t('data')}>
@@ -190,6 +280,7 @@ const styles = StyleSheet.create({
     borderWidth: StyleSheet.hairlineWidth,
     borderColor: colors.hairline,
   },
+  howTo: { color: colors.text, fontSize: 14, lineHeight: 21 },
   note: { color: colors.textDim, fontSize: 13, lineHeight: 18, paddingHorizontal: space.sm },
   row: { flexDirection: 'row', alignItems: 'center', paddingHorizontal: space.lg, height: 54, gap: space.md },
   border: { borderTopWidth: StyleSheet.hairlineWidth, borderTopColor: colors.hairline },

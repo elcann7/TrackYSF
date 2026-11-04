@@ -5,13 +5,16 @@ import type { SFSymbol } from 'expo-symbols';
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { ActivityIndicator, StyleSheet, Text, TextInput, View } from 'react-native';
 import Animated, { FadeIn, FadeInDown } from 'react-native-reanimated';
-import { allMyFoods, recentFoods, type Entry, type MealType } from '@/lib/db';
+import { allFavorites, allMyFoods, recentFoods, type Entry, type Favorite, type MealType } from '@/lib/db';
 import { commonFoods, matchScore, myFoodToFood, normalize, searchOnline, type Food } from '@/lib/foods';
 import { fmt } from '@/lib/i18n';
 import { setPickedFood } from '@/lib/selection';
 import { useApp } from '@/lib/store';
 import { colors, radius, space } from '@/theme';
 import { Card, Icon, PressableScale, haptic } from './ui';
+
+/** Anything that can be re-added in one tap (a recent entry or a saved meal). */
+export type QuickItem = Pick<Entry, 'name' | 'kcal' | 'protein' | 'carbs' | 'fat' | 'items' | 'thumb'> & { id: number };
 
 export function FoodPicker({
   date,
@@ -26,13 +29,14 @@ export function FoodPicker({
   onCamera: () => void;
   onLibrary: () => void;
   onDescribe: (prefill?: string) => void;
-  onRecent: (e: Entry) => void;
+  onRecent: (e: QuickItem) => void;
 }) {
   const db = useSQLiteContext();
   const { t, lang, dataVersion } = useApp();
   const [q, setQ] = useState('');
   const [mine, setMine] = useState<Food[]>([]);
   const [recent, setRecent] = useState<Entry[]>([]);
+  const [favs, setFavs] = useState<Favorite[]>([]);
   const [online, setOnline] = useState<Food[]>([]);
   const [loadingOnline, setLoadingOnline] = useState(false);
   const common = useMemo(() => commonFoods(lang), [lang]);
@@ -41,6 +45,7 @@ export function FoodPicker({
     useCallback(() => {
       allMyFoods(db).then((rows) => setMine(rows.map(myFoodToFood)));
       recentFoods(db).then(setRecent);
+      allFavorites(db).then(setFavs);
     }, [db, dataVersion]),
   );
 
@@ -130,6 +135,7 @@ export function FoodPicker({
           <View style={styles.tiles}>
             <Tile icon="camera.fill" label={t('camera')} primary onPress={onCamera} />
             <Tile icon="photo.on.rectangle" label={t('library')} onPress={onLibrary} />
+            <Tile icon="barcode.viewfinder" label={t('scanBarcode')} onPress={() => router.push({ pathname: '/scan', params: { date, meal } })} />
             <Tile icon="sparkles" label={t('aiScan')} onPress={() => onDescribe()} />
           </View>
           <View style={styles.actions}>
@@ -137,41 +143,53 @@ export function FoodPicker({
             <Action icon="square.and.pencil" label={t('createFood')} onPress={() => router.push('/create-food')} />
           </View>
 
+          {favs.length > 0 && <QuickList title={t('favorites')} items={favs} onPick={onRecent} star />}
+
           {mine.length > 0 && <FoodList title={t('myFoods')} foods={mine.slice(0, 8)} onPick={open} />}
 
-          <View style={{ gap: space.sm }}>
-            <Text style={styles.section}>{t('recent')}</Text>
-            {recent.length === 0 ? (
+          {recent.length === 0 ? (
+            <View style={{ gap: space.sm }}>
+              <Text style={styles.section}>{t('recent')}</Text>
               <Text style={styles.hint}>{t('noRecent')}</Text>
-            ) : (
-              <Card style={{ padding: 0 }}>
-                {recent.map((e, i) => (
-                  <Animated.View key={e.id} entering={FadeInDown.delay(i * 30).duration(300)}>
-                    <PressableScale onPress={() => onRecent(e)} scaleTo={0.98} style={[styles.row, i > 0 && styles.rowBorder]}>
-                      {e.thumb ? (
-                        <Image source={{ uri: `data:image/jpeg;base64,${e.thumb}` }} style={styles.thumb} />
-                      ) : (
-                        <View style={[styles.thumb, styles.thumbEmpty]}>
-                          <Icon name="fork.knife" size={14} color={colors.textDim} />
-                        </View>
-                      )}
-                      <View style={{ flex: 1 }}>
-                        <Text style={styles.rowName} numberOfLines={1}>
-                          {e.name}
-                        </Text>
-                        <Text style={styles.rowSub}>
-                          {Math.round(e.kcal)} {t('kcal')} · P {Math.round(e.protein)} · C {Math.round(e.carbs)} · F {Math.round(e.fat)}
-                        </Text>
-                      </View>
-                      <Icon name="plus.circle.fill" size={24} color={colors.accent} />
-                    </PressableScale>
-                  </Animated.View>
-                ))}
-              </Card>
-            )}
-          </View>
+            </View>
+          ) : (
+            <QuickList title={t('recent')} items={recent} onPick={onRecent} />
+          )}
         </Animated.View>
       )}
+    </View>
+  );
+}
+
+function QuickList({ title, items, onPick, star }: { title: string; items: QuickItem[]; onPick: (e: QuickItem) => void; star?: boolean }) {
+  const { t } = useApp();
+  return (
+    <View style={{ gap: space.sm }}>
+      <Text style={styles.section}>{title}</Text>
+      <Card style={{ padding: 0 }}>
+        {items.map((e, i) => (
+          <Animated.View key={e.id} entering={FadeInDown.delay(i * 30).duration(300)}>
+            <PressableScale onPress={() => onPick(e)} scaleTo={0.98} style={[styles.row, i > 0 && styles.rowBorder]}>
+              {e.thumb ? (
+                <Image source={{ uri: `data:image/jpeg;base64,${e.thumb}` }} style={styles.thumb} />
+              ) : (
+                <View style={[styles.thumb, styles.thumbEmpty]}>
+                  <Icon name={star ? 'star.fill' : 'fork.knife'} size={14} color={star ? colors.accent : colors.textDim} />
+                </View>
+              )}
+              <View style={{ flex: 1 }}>
+                <Text style={styles.rowName} numberOfLines={1}>
+                  {e.name}
+                </Text>
+                <Text style={styles.rowSub}>
+                  {Math.round(e.kcal)} {t('kcal')} · P {Math.round(e.protein)} · C {Math.round(e.carbs)} · F {Math.round(e.fat)}
+                </Text>
+              </View>
+              <Icon name="plus.circle.fill" size={24} color={colors.accent} />
+            </PressableScale>
+          </Animated.View>
+        ))}
+      </Card>
     </View>
   );
 }

@@ -234,6 +234,35 @@ export function macrosFor(food: Food, grams: number): Macros {
   };
 }
 
+// ---------- Open Food Facts barcode lookup ----------
+export async function lookupBarcode(code: string, signal?: AbortSignal): Promise<Food | null> {
+  const url = `https://world.openfoodfacts.org/api/v2/product/${encodeURIComponent(code)}.json?fields=product_name,brands,nutriments,serving_quantity,quantity`;
+  const res = await fetch(url, { signal, headers: { 'User-Agent': 'TrackYSF/1.0 (open-source calorie tracker)' } });
+  if (!res.ok) return null;
+  const json = (await res.json()) as { status?: number; product?: OffHit };
+  const h = json.product;
+  if (!h) return null;
+  const n = h.nutriments ?? {};
+  const kcal = Number(n['energy-kcal_100g'] ?? (Number(n['energy_100g']) ? Number(n['energy_100g']) / 4.184 : NaN));
+  if (!Number.isFinite(kcal)) return null;
+  const brand = Array.isArray(h.brands) ? h.brands[0] : h.brands?.split(',')[0];
+  const serving = Number(h.serving_quantity);
+  return {
+    key: `b:${code}`,
+    name: (h.product_name ?? '').trim() || code,
+    brand: brand?.trim() || undefined,
+    per100: {
+      kcal: Math.round(kcal),
+      protein: Number(n.proteins_100g) || 0,
+      carbs: Number(n.carbohydrates_100g) || 0,
+      fat: Number(n.fat_100g) || 0,
+    },
+    unit: /\b(ml|l|cl)\b/i.test(h.quantity ?? '') ? 'ml' : 'g',
+    servings: serving > 0 && serving < 3000 ? [{ label: '1 serving', grams: serving }] : [],
+    source: 'online',
+  };
+}
+
 // ---------- Open Food Facts (search-a-licious) ----------
 const OFF_URL = 'https://search.openfoodfacts.org/search';
 

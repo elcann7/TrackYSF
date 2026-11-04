@@ -2,12 +2,25 @@ import { Image } from 'expo-image';
 import { router, useFocusEffect } from 'expo-router';
 import { useSQLiteContext } from 'expo-sqlite';
 import { useCallback, useMemo, useState } from 'react';
-import { ScrollView, StyleSheet, Text, View } from 'react-native';
+import { Alert, ScrollView, StyleSheet, Text, View } from 'react-native';
 import Animated, { FadeInDown, LinearTransition } from 'react-native-reanimated';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { CalorieRing } from '@/components/CalorieRing';
 import { Card, Icon, MacroBar, PressableScale, haptic } from '@/components/ui';
-import { MEALS, datesWithEntries, entriesForDate, type Entry, type MealType } from '@/lib/db';
+import { ACTIVITIES, GLASS_ML, activityName, waterTargetMl } from '@/lib/activity';
+import {
+  MEALS,
+  cardioForDate,
+  copyMeal,
+  datesWithEntries,
+  deleteCardio,
+  entriesForDate,
+  getWater,
+  setWater,
+  type CardioEntry,
+  type Entry,
+  type MealType,
+} from '@/lib/db';
 import { addDays, fromKey, todayKey } from '@/lib/dates';
 import { MONTHS, WEEKDAYS } from '@/lib/i18n';
 import { sumMacros } from '@/lib/nutrition';
@@ -17,10 +30,12 @@ import { colors, radius, space, type } from '@/theme';
 export default function Today() {
   const insets = useSafeAreaInsets();
   const db = useSQLiteContext();
-  const { t, lang, targets, dataVersion } = useApp();
+  const { t, lang, targets, profile, dataVersion, bump } = useApp();
   const [date, setDate] = useState(todayKey());
   const [entries, setEntries] = useState<Entry[]>([]);
   const [marked, setMarked] = useState<Set<string>>(new Set());
+  const [cardio, setCardio] = useState<CardioEntry[]>([]);
+  const [water, setWaterState] = useState(0);
 
   const week = useMemo(() => {
     const today = todayKey();
@@ -31,10 +46,17 @@ export default function Today() {
     useCallback(() => {
       let alive = true;
       (async () => {
-        const [e, m] = await Promise.all([entriesForDate(db, date), datesWithEntries(db, week[0], week[6])]);
+        const [e, m, c, w] = await Promise.all([
+          entriesForDate(db, date),
+          datesWithEntries(db, week[0], week[6]),
+          cardioForDate(db, date),
+          getWater(db, date),
+        ]);
         if (alive) {
           setEntries(e);
           setMarked(m);
+          setCardio(c);
+          setWaterState(w);
         }
       })();
       return () => {
@@ -45,6 +67,40 @@ export default function Today() {
 
   const totals = useMemo(() => sumMacros(entries), [entries]);
   const tg = targets ?? { kcal: 2500, protein: 120, carbs: 300, fat: 70 };
+  // extra activity raises today's budget (planned strength training is already inside tg.kcal)
+  const burned = Math.round(cardio.reduce((a, c) => a + c.kcal, 0));
+  const budget = tg.kcal + burned;
+  const waterGoal = waterTargetMl(profile?.weightKg ?? 70);
+
+  const changeWater = async (delta: number) => {
+    const next = Math.max(0, water + delta);
+    haptic.tap();
+    setWaterState(next);
+    await setWater(db, date, next);
+  };
+
+  const copyFromYesterday = async (meal: MealType) => {
+    const n = await copyMeal(db, addDays(date, -1), date, meal);
+    if (n === 0) {
+      Alert.alert(t('nothingToCopy'));
+      return;
+    }
+    haptic.success();
+    bump();
+  };
+
+  const removeCardio = (c: CardioEntry) =>
+    Alert.alert(t('delete'), `${activityName(c.type, lang)} · ${c.minutes}′`, [
+      { text: t('cancel'), style: 'cancel' },
+      {
+        text: t('delete'),
+        style: 'destructive',
+        onPress: async () => {
+          await deleteCardio(db, c.id);
+          bump();
+        },
+      },
+    ]);
 
   const d = fromKey(date);
   const isToday = date === todayKey();
@@ -98,11 +154,16 @@ export default function Today() {
         <Animated.View entering={FadeInDown.duration(500)} style={{ paddingHorizontal: space.lg }}>
           <Card style={styles.summary}>
             <View style={styles.summaryTop}>
-              <CalorieRing eaten={totals.kcal} target={tg.kcal} leftLabel={t('remaining')} overLabel={t('over')} unit={t('kcal')} />
+              <CalorieRing eaten={totals.kcal} target={budget} leftLabel={t('remaining')} overLabel={t('over')} unit={t('kcal')} />
               <View style={styles.sideStats}>
                 <Stat label={t('eaten')} value={Math.round(totals.kcal)} unit={t('kcal')} />
                 <View style={styles.sep} />
                 <Stat label={t('goal')} value={tg.kcal} unit={t('kcal')} />
+                {burned > 0 && (
+                  <Text style={styles.burned}>
+                    +{burned} {t('exerciseKcal')}
+                  </Text>
+                )}
               </View>
             </View>
             <View style={styles.macros}>
@@ -131,7 +192,13 @@ export default function Today() {
                     </PressableScale>
                   </View>
                   {list.length === 0 ? (
-                    <Text style={styles.empty}>{t('emptyMeal')}</Text>
+                    <View style={styles.emptyRow}>
+                      <Text style={[styles.empty, { flex: 1 }]}>{t('emptyMeal')}</Text>
+                      <PressableScale onPress={() => copyFromYesterday(meal)} style={styles.copyBtn}>
+                        <Icon name="doc.on.doc" size={13} color={colors.textDim} />
+                        <Text style={styles.copyText}>{t('copyYesterday')}</Text>
+                      </PressableScale>
+                    </View>
                   ) : (
                     list.map((e) => <EntryRow key={e.id} e={e} />)
                   )}
@@ -139,6 +206,62 @@ export default function Today() {
               </Animated.View>
             );
           })}
+
+          {/* Water */}
+          <Card style={{ gap: space.md }}>
+            <View style={styles.rowHead}>
+              <Icon name="drop.fill" size={18} color="#6FA8DC" />
+              <Text style={styles.mealTitle}>{t('water')}</Text>
+              <Text style={styles.mealKcal}>
+                {(water / 1000).toFixed(2)} / {(waterGoal / 1000).toFixed(2)} L
+              </Text>
+            </View>
+            <View style={styles.glasses}>
+              {Array.from({ length: Math.max(8, Math.ceil(waterGoal / GLASS_ML)) }, (_, i) => (
+                <PressableScale
+                  key={i}
+                  hapticOnPress={false}
+                  // tap a glass to fill up to it; tap the last full glass again to empty it
+                  onPress={() => changeWater(((i + 1) * GLASS_ML === water ? i * GLASS_ML : (i + 1) * GLASS_ML) - water)}
+                  style={[styles.glass, (i + 1) * GLASS_ML <= water && styles.glassFull]}
+                >
+                  <Icon name="drop.fill" size={14} color={(i + 1) * GLASS_ML <= water ? '#0D0E10' : colors.textFaint} />
+                </PressableScale>
+              ))}
+            </View>
+            <View style={{ flexDirection: 'row', gap: space.sm }}>
+              <PressableScale onPress={() => changeWater(-GLASS_ML)} style={styles.waterBtn} hapticOnPress={false}>
+                <Icon name="minus" size={14} color={colors.text} weight="bold" />
+              </PressableScale>
+              <PressableScale onPress={() => changeWater(GLASS_ML)} style={[styles.waterBtn, { flex: 1, backgroundColor: 'rgba(111,168,220,0.18)' }]} hapticOnPress={false}>
+                <Text style={styles.waterText}>+ 250 ml</Text>
+              </PressableScale>
+            </View>
+          </Card>
+
+          {/* Activity */}
+          <Card style={{ padding: 0 }}>
+            <View style={styles.mealHead}>
+              <Text style={styles.mealTitle}>{t('activity')}</Text>
+              <Text style={styles.mealKcal}>{burned > 0 ? `+${burned} ${t('kcal')}` : ''}</Text>
+              <PressableScale onPress={() => router.push({ pathname: '/cardio', params: { date } })} style={styles.mealAdd}>
+                <Icon name="plus" size={16} color={colors.text} weight="semibold" />
+              </PressableScale>
+            </View>
+            {cardio.length === 0 ? (
+              <Text style={styles.empty}>{t('emptyMeal')}</Text>
+            ) : (
+              cardio.map((c) => (
+                <PressableScale key={c.id} onLongPress={() => removeCardio(c)} onPress={() => removeCardio(c)} hapticOnPress={false} style={styles.entry}>
+                  <Icon name={ACTIVITIES.find((a) => a.key === c.type)?.icon ?? 'figure.walk'} size={20} color={colors.accent} />
+                  <Text style={[styles.entryName, { flex: 1 }]} numberOfLines={1}>
+                    {activityName(c.type, lang)} · {c.minutes}′
+                  </Text>
+                  <Text style={styles.entryKcal}>+{Math.round(c.kcal)}</Text>
+                </PressableScale>
+              ))
+            )}
+          </Card>
         </View>
       </ScrollView>
     </View>
@@ -234,6 +357,16 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
   },
   empty: { color: colors.textFaint, fontSize: 14, paddingHorizontal: space.lg, paddingBottom: space.lg },
+  emptyRow: { flexDirection: 'row', alignItems: 'center' },
+  copyBtn: { flexDirection: 'row', alignItems: 'center', gap: 5, marginRight: space.lg, marginBottom: space.lg, paddingHorizontal: 10, paddingVertical: 6, borderRadius: radius.pill, backgroundColor: colors.surfaceHigh },
+  copyText: { color: colors.textDim, fontSize: 12, fontWeight: '600' },
+  burned: { color: colors.success, fontSize: 13, fontWeight: '700', marginTop: -4 },
+  rowHead: { flexDirection: 'row', alignItems: 'center', gap: 8 },
+  glasses: { flexDirection: 'row', flexWrap: 'wrap', gap: 6 },
+  glass: { width: 30, height: 36, borderRadius: 8, backgroundColor: colors.surfaceHigh, alignItems: 'center', justifyContent: 'center' },
+  glassFull: { backgroundColor: '#6FA8DC' },
+  waterBtn: { height: 40, minWidth: 48, borderRadius: radius.md, backgroundColor: colors.surfaceHigh, alignItems: 'center', justifyContent: 'center' },
+  waterText: { color: '#9CC3E6', fontSize: 14, fontWeight: '700' },
   entry: {
     flexDirection: 'row',
     alignItems: 'center',

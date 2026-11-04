@@ -19,7 +19,7 @@ export default function FoodAmount() {
   const { t, bump } = useApp();
   const params = useLocalSearchParams<{ date?: string; meal?: MealType }>();
   const food = getPickedFood();
-  const [meal, setMeal] = useState<MealType>(params.meal ?? mealForNow());
+  const [meal, setMeal] = useState<MealType>(params.meal || mealForNow());
 
   // unit options: grams, plus each named serving
   const options = useMemo(
@@ -48,7 +48,7 @@ export default function FoodAmount() {
     if (grams <= 0) return;
     const name = food.brand ? `${food.name} (${food.brand})` : food.name;
     await addEntry(db, {
-      date: params.date ?? todayKey(),
+      date: params.date || todayKey(),
       meal,
       name,
       ...m,

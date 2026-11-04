@@ -40,7 +40,15 @@
           "photosPermission": "TrackYSF reads meal photos to estimate calories.",
           "cameraPermission": "TrackYSF uses the camera to photograph your meals."
         }
-      ]
+      ],
+      "expo-sharing",
+      [
+        "expo-camera",
+        {
+          "cameraPermission": "TrackYSF uses the camera to photograph meals and scan barcodes."
+        }
+      ],
+      "expo-notifications"
     ]
   }
 }

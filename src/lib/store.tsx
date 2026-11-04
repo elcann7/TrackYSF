@@ -22,6 +22,8 @@ interface AppState {
   setApiKey: (k: string) => Promise<void>;
   bump: () => void;
   resetState: () => void;
+  /** Re-read everything from the database (after restoring a backup). */
+  reload: () => Promise<void>;
   t: (k: TKey) => string;
 }
 
@@ -41,21 +43,25 @@ export function AppStateProvider({ children }: { children: ReactNode }) {
   const [apiKey, setApiKeyState] = useState('');
   const [dataVersion, setDataVersion] = useState(0);
 
-  useEffect(() => {
-    (async () => {
-      const [l, p, tg, stored] = await Promise.all([
-        kvGet<Lang>(db, 'lang'),
-        kvGet<Profile>(db, 'profile'),
-        kvGet<Targets>(db, 'targets'),
-        SecureStore.getItemAsync(KEY_STORE).catch(() => null),
-      ]);
-      if (l) setLangState(l);
-      setProfile(p ? migrateProfile(p) : null);
-      setTargetsState(tg);
-      setApiKeyState(stored || process.env.EXPO_PUBLIC_GEMINI_API_KEY || '');
-      setReady(true);
-    })();
+  const load = useCallback(async () => {
+    const [l, p, tg, stored] = await Promise.all([
+      kvGet<Lang>(db, 'lang'),
+      kvGet<Profile>(db, 'profile'),
+      kvGet<Targets>(db, 'targets'),
+      SecureStore.getItemAsync(KEY_STORE).catch(() => null),
+    ]);
+    if (l) setLangState(l);
+    setProfile(p ? migrateProfile(p) : null);
+    setTargetsState(tg);
+    // Each user brings their own free key (Settings). The env fallback only exists in local dev builds.
+    setApiKeyState(stored || process.env.EXPO_PUBLIC_GEMINI_API_KEY || '');
+    setDataVersion((v) => v + 1);
+    setReady(true);
   }, [db]);
+
+  useEffect(() => {
+    load();
+  }, [load]);
 
   const setLang = useCallback(
     async (l: Lang) => {
@@ -113,9 +119,10 @@ export function AppStateProvider({ children }: { children: ReactNode }) {
       setApiKey,
       bump,
       resetState,
+      reload: load,
       t,
     }),
-    [ready, lang, profile, targets, apiKey, dataVersion, setLang, saveProfile, setTargets, setApiKey, bump, resetState, t],
+    [ready, lang, profile, targets, apiKey, dataVersion, setLang, saveProfile, setTargets, setApiKey, bump, resetState, load, t],
   );
 
   return <Ctx.Provider value={value}>{children}</Ctx.Provider>;

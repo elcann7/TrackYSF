@@ -9,6 +9,7 @@ import { ExerciseAnim } from '@/components/ExerciseAnim';
 import { Button, Card, Icon, PressableScale, haptic } from '@/components/ui';
 import { kvGet, kvSet } from '@/lib/db';
 import { WEEKDAYS, fmt, type TKey } from '@/lib/i18n';
+import { applyReminders, type ReminderSettings } from '@/lib/reminders';
 import { useApp } from '@/lib/store';
 import {
   ALL_MUSCLES,
@@ -55,6 +56,9 @@ export default function ProgramSetup() {
   const save = async () => {
     if (!program) return;
     await kvSet(db, 'program', program);
+    // workout-day reminders follow the new schedule
+    const rem = await kvGet<ReminderSettings>(db, 'reminders');
+    if (rem?.workouts) await applyReminders(rem, lang, program.days.map((d) => d.weekday)).catch(() => {});
     haptic.success();
     bump();
     router.back();
