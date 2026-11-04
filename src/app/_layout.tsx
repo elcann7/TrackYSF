@@ -25,6 +25,7 @@ function RootStack() {
         <Stack.Screen name="create-food" options={{ presentation: 'modal' }} />
         <Stack.Screen name="program-setup" options={{ presentation: 'modal' }} />
         <Stack.Screen name="scan" options={{ presentation: 'fullScreenModal' }} />
+        <Stack.Screen name="reminders" options={{ presentation: 'modal' }} />
         <Stack.Screen
           name="cardio"
           options={{

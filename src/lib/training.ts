@@ -406,6 +406,13 @@ export interface ProgramOptions {
   /** Muscles to prioritise (max 3). */
   priorities: Muscle[];
   limitations: Limitation[];
+  /** Chosen training weekdays (0 = Monday). Defaults to an evenly spread schedule. */
+  weekdays?: number[];
+}
+
+/** Evenly spread default schedule for n training days (rest days between sessions where possible). */
+export function defaultWeekdays(n: number): number[] {
+  return WEEKDAYS_BY_COUNT[Math.min(6, Math.max(1, n))] ?? [0, 2, 4];
 }
 
 export interface PlannedExercise {
@@ -523,8 +530,10 @@ function applyLimits(id: string, limits: Limitation[]): string | null {
 }
 
 export function generateProgram(profile: Profile, options: ProgramOptions): Program | null {
-  const days = Math.min(6, Math.max(0, profile.trainingDays));
+  const chosen0 = options.weekdays?.length ? [...new Set(options.weekdays)].sort((a, b) => a - b).slice(0, 6) : null;
+  const days = chosen0 ? chosen0.length : Math.min(6, Math.max(0, profile.trainingDays));
   if (days === 0) return null;
+  const weekdays = chosen0 ?? WEEKDAYS_BY_COUNT[days];
   const { split, kinds } = SPLITS[days];
   const { equipment, goal, priorities, limitations } = options;
   const eqIdx = equipment === 'gym' ? 0 : equipment === 'dumbbells' ? 1 : 2;
@@ -601,7 +610,7 @@ export function generateProgram(profile: Profile, options: ProgramOptions): Prog
       if (info?.timed) [repMin, repMax] = [30, 60];
       return { id, sets, repMin, repMax, restSec, priority: prio };
     });
-    return { key: `${kind}-${i}`, kind, weekday: WEEKDAYS_BY_COUNT[days][i], exercises };
+    return { key: `${kind}-${i}`, kind, weekday: weekdays[i], exercises };
   });
 
   const weeklySets = Object.fromEntries(ALL_MUSCLES.map((m) => [m, 0])) as Record<Muscle, number>;

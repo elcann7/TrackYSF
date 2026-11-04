@@ -4,15 +4,13 @@ import { router } from 'expo-router';
 import * as Sharing from 'expo-sharing';
 import { useSQLiteContext } from 'expo-sqlite';
 import { useEffect, useState } from 'react';
-import { Alert, Linking, ScrollView, StyleSheet, Switch, Text, TextInput, View } from 'react-native';
+import { Alert, Linking, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Button, Card, Segmented, haptic } from '@/components/ui';
-import { eraseAll, exportAll, importAll, kvGet, kvSet } from '@/lib/db';
+import { eraseAll, exportAll, importAll } from '@/lib/db';
 import { todayKey } from '@/lib/dates';
 import { AnalyzeError, testKey } from '@/lib/gemini';
-import type { Lang, TKey } from '@/lib/i18n';
-import { DEFAULT_REMINDERS, applyReminders, ensurePermission, type ReminderSettings } from '@/lib/reminders';
-import type { Program } from '@/lib/training';
+import type { Lang } from '@/lib/i18n';
 import { computeTargets, type Targets } from '@/lib/nutrition';
 import { useApp } from '@/lib/store';
 import { colors, radius, space, type } from '@/theme';
@@ -56,25 +54,6 @@ export default function Settings() {
     } finally {
       setTesting(false);
     }
-  };
-
-  // ----- reminders -----
-  const [rem, setRem] = useState<ReminderSettings>(DEFAULT_REMINDERS);
-  useEffect(() => {
-    kvGet<ReminderSettings>(db, 'reminders').then((r) => r && setRem({ ...DEFAULT_REMINDERS, ...r }));
-  }, [db]);
-
-  const toggleReminder = async (k: keyof ReminderSettings, v: boolean) => {
-    if (v && !(await ensurePermission())) {
-      Alert.alert(t('remDenied'));
-      return;
-    }
-    const next = { ...rem, [k]: v };
-    setRem(next);
-    haptic.select();
-    await kvSet(db, 'reminders', next);
-    const program = await kvGet<Program>(db, 'program');
-    await applyReminders(next, lang, program?.days.map((d) => d.weekday) ?? []);
   };
 
   // ----- backup -----
@@ -195,14 +174,7 @@ export default function Settings() {
       </Section>
 
       <Section title={t('reminders')}>
-        <Card style={{ padding: 0 }}>
-          {(['meals', 'weighIn', 'workouts', 'water'] as (keyof ReminderSettings)[]).map((k, i) => (
-            <View key={k} style={[styles.row, i > 0 && styles.border]}>
-              <Text style={[styles.rowLabel, { fontSize: 15 }]}>{t(`rem_${k}` as TKey)}</Text>
-              <Switch value={rem[k]} onValueChange={(v) => toggleReminder(k, v)} trackColor={{ true: colors.accent, false: colors.surfaceHigher }} />
-            </View>
-          ))}
-        </Card>
+        <Button title={t('reminderSettings')} variant="secondary" icon="bell.badge" onPress={() => router.push('/reminders')} />
       </Section>
 
       <Section title={t('backup')}>

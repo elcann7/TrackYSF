@@ -48,7 +48,8 @@
           "cameraPermission": "TrackYSF uses the camera to photograph meals and scan barcodes."
         }
       ],
-      "expo-notifications"
+      "expo-notifications",
+      "@react-native-community/datetimepicker"
     ]
   }
 }

@@ -9,13 +9,16 @@ import { ExerciseAnim } from '@/components/ExerciseAnim';
 import { Button, Card, Icon, PressableScale, haptic } from '@/components/ui';
 import { kvGet, kvSet } from '@/lib/db';
 import { WEEKDAYS, fmt, type TKey } from '@/lib/i18n';
-import { applyReminders, type ReminderSettings } from '@/lib/reminders';
+import { DEFAULT_REMINDERS, applyReminders, normalizeReminders, type ReminderSettings } from '@/lib/reminders';
+import { computeTargets } from '@/lib/nutrition';
+import { TimeField, WeekdayPicker } from '@/components/TimeField';
 import { useApp } from '@/lib/store';
 import {
   ALL_MUSCLES,
   DAY_TITLES,
   MUSCLE_NAMES,
   exerciseName,
+  defaultWeekdays,
   generateProgram,
   type Equipment,
   type Limitation,
@@ -26,12 +29,13 @@ import {
 } from '@/lib/training';
 import { colors, radius, space, type } from '@/theme';
 
-const STEPS = ['equipment', 'goal', 'priority', 'limits', 'preview'] as const;
+const STEPS = ['equipment', 'days', 'goal', 'priority', 'limits', 'preview'] as const;
 
 export default function ProgramSetup() {
   const insets = useSafeAreaInsets();
   const db = useSQLiteContext();
-  const { t, lang, profile, bump } = useApp();
+  const { t, lang, profile, bump, saveProfile } = useApp();
+  const [trainTime, setTrainTime] = useState(DEFAULT_REMINDERS.workoutTime);
   const [step, setStep] = useState(0);
   const [dir, setDir] = useState<1 | -1>(1);
   const [opts, setOpts] = useState<ProgramOptions>({ equipment: 'gym', goal: 'muscle', priorities: [], limitations: [] });
@@ -39,10 +43,12 @@ export default function ProgramSetup() {
   // reuse previous answers when rebuilding
   useEffect(() => {
     kvGet<Program>(db, 'program').then((p) => {
-      if (p?.options) setOpts(p.options);
-      else if (p?.equipment) setOpts((o) => ({ ...o, equipment: p.equipment }));
+      const fallbackDays = p?.days.map((d) => d.weekday) ?? defaultWeekdays(profile?.trainingDays || 3);
+      if (p?.options) setOpts({ ...p.options, weekdays: p.options.weekdays ?? fallbackDays });
+      else setOpts((o) => ({ ...o, equipment: p?.equipment ?? o.equipment, weekdays: fallbackDays }));
     });
-  }, [db]);
+    kvGet<Partial<ReminderSettings>>(db, 'reminders').then((r) => setTrainTime(normalizeReminders(r).workoutTime));
+  }, [db, profile?.trainingDays]);
 
   const program = useMemo(() => (profile ? generateProgram(profile, opts) : null), [profile, opts]);
   const name = STEPS[step];
@@ -56,9 +62,15 @@ export default function ProgramSetup() {
   const save = async () => {
     if (!program) return;
     await kvSet(db, 'program', program);
-    // workout-day reminders follow the new schedule
-    const rem = await kvGet<ReminderSettings>(db, 'reminders');
-    if (rem?.workouts) await applyReminders(rem, lang, program.days.map((d) => d.weekday)).catch(() => {});
+    // the number of chosen days is the real training frequency → keep the energy model in sync
+    if (profile && program.days.length !== profile.trainingDays) {
+      const p2 = { ...profile, trainingDays: program.days.length };
+      await saveProfile(p2, computeTargets(p2));
+    }
+    // reminder time + workout-day reminders follow the new schedule
+    const rem = { ...normalizeReminders(await kvGet<Partial<ReminderSettings>>(db, 'reminders')), workoutTime: trainTime };
+    await kvSet(db, 'reminders', rem);
+    if (rem.workouts) await applyReminders(rem, lang, program.days.map((d) => d.weekday)).catch(() => {});
     haptic.success();
     bump();
     router.back();
@@ -109,6 +121,20 @@ export default function ProgramSetup() {
               ).map(([k, icon]) => (
                 <Choice key={k} icon={icon} title={t(`eq_${k}` as TKey)} desc={t(`eq_${k}_d` as TKey)} selected={opts.equipment === k} onPress={() => setOpts({ ...opts, equipment: k })} />
               ))}
+            </>
+          )}
+
+          {name === 'days' && (
+            <>
+              <Text style={styles.q}>{t('daysQ')}</Text>
+              <Text style={styles.sub}>{t('daysSub')}</Text>
+              <WeekdayPicker labels={WEEKDAYS[lang]} value={opts.weekdays ?? []} max={6} onChange={(d) => setOpts({ ...opts, weekdays: d })} />
+              <Text style={styles.sub}>
+                {(opts.weekdays?.length ?? 0)} {lang === 'az' ? 'gün' : 'days'} · {t('restNote')}
+              </Text>
+              <Card style={{ padding: 0 }}>
+                <TimeField label={t('trainTime')} value={trainTime} onChange={setTrainTime} />
+              </Card>
             </>
           )}
 
@@ -241,7 +267,7 @@ export default function ProgramSetup() {
         {name === 'preview' ? (
           <Button title={t('generate')} icon="checkmark" onPress={save} disabled={!program} />
         ) : (
-          <Button title={t('continue')} onPress={() => go(1)} />
+          <Button title={t('continue')} onPress={() => go(1)} disabled={name === 'days' && !opts.weekdays?.length} />
         )}
       </View>
     </View>

@@ -1,14 +1,58 @@
 import * as Notifications from 'expo-notifications';
 import type { Lang } from './i18n';
 
+/** Times are "HH:MM" (24 h). Weekdays: 0 = Monday … 6 = Sunday. */
 export interface ReminderSettings {
   meals: boolean;
+  mealTimes: { breakfast: string; lunch: string; dinner: string };
   weighIn: boolean;
+  weighTime: string;
+  weighDays: number[];
   workouts: boolean;
+  /** Reminder time on training days (the training days themselves come from the program). */
+  workoutTime: string;
   water: boolean;
+  waterTimes: string[];
 }
 
-export const DEFAULT_REMINDERS: ReminderSettings = { meals: false, weighIn: false, workouts: false, water: false };
+export const DEFAULT_REMINDERS: ReminderSettings = {
+  meals: false,
+  mealTimes: { breakfast: '09:30', lunch: '14:00', dinner: '20:00' },
+  weighIn: false,
+  weighTime: '08:00',
+  weighDays: [0, 3],
+  workouts: false,
+  workoutTime: '17:00',
+  water: false,
+  waterTimes: ['11:00', '15:00', '18:00'],
+};
+
+/** Old versions stored plain booleans only; fill in any missing fields. */
+export function normalizeReminders(r: Partial<ReminderSettings> | null | undefined): ReminderSettings {
+  return {
+    ...DEFAULT_REMINDERS,
+    ...(r ?? {}),
+    mealTimes: { ...DEFAULT_REMINDERS.mealTimes, ...(r?.mealTimes ?? {}) },
+    weighDays: r?.weighDays?.length ? r.weighDays : DEFAULT_REMINDERS.weighDays,
+    waterTimes: r?.waterTimes?.length ? r.waterTimes : DEFAULT_REMINDERS.waterTimes,
+  };
+}
+
+export function parseTime(s: string): { hour: number; minute: number } {
+  const [h, m] = s.split(':').map(Number);
+  return { hour: Number.isFinite(h) ? h : 9, minute: Number.isFinite(m) ? m : 0 };
+}
+
+export function formatTime(d: Date): string {
+  return `${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`;
+}
+
+export function timeToDate(s: string): Date {
+  const { hour, minute } = parseTime(s);
+  const d = new Date();
+  d.setHours(hour, minute, 0, 0);
+  return d;
+}
 
 const TEXT: Record<Lang, Record<string, [string, string]>> = {
   en: {
@@ -45,18 +89,16 @@ export async function ensurePermission(): Promise<boolean> {
   return req.granted;
 }
 
-const daily = (hour: number, minute: number): Notifications.NotificationTriggerInput => ({
+const daily = (time: string): Notifications.NotificationTriggerInput => ({
   type: Notifications.SchedulableTriggerInputTypes.DAILY,
-  hour,
-  minute,
+  ...parseTime(time),
 });
 
-/** weekday: 0 = Monday … 6 = Sunday (iOS uses 1 = Sunday). */
-const weekly = (weekday: number, hour: number, minute: number): Notifications.NotificationTriggerInput => ({
+/** iOS weekday: 1 = Sunday … 7 = Saturday. */
+const weekly = (weekday: number, time: string): Notifications.NotificationTriggerInput => ({
   type: Notifications.SchedulableTriggerInputTypes.WEEKLY,
   weekday: ((weekday + 1) % 7) + 1,
-  hour,
-  minute,
+  ...parseTime(time),
 });
 
 /** Cancels everything and schedules the enabled reminders again (idempotent). */
@@ -67,15 +109,11 @@ export async function applyReminders(s: ReminderSettings, lang: Lang, trainingWe
     Notifications.scheduleNotificationAsync({ content: { title: tx[k][0], body: tx[k][1] }, trigger });
 
   if (s.meals) {
-    await add('breakfast', daily(9, 30));
-    await add('lunch', daily(14, 0));
-    await add('dinner', daily(20, 0));
+    await add('breakfast', daily(s.mealTimes.breakfast));
+    await add('lunch', daily(s.mealTimes.lunch));
+    await add('dinner', daily(s.mealTimes.dinner));
   }
-  if (s.weighIn) {
-    // 2× a week is enough for a reliable trend (Mon & Thu)
-    await add('weigh', weekly(0, 8, 0));
-    await add('weigh', weekly(3, 8, 0));
-  }
-  if (s.workouts) for (const d of trainingWeekdays) await add('workout', weekly(d, 17, 0));
-  if (s.water) for (const h of [11, 15, 18]) await add('water', daily(h, 0));
+  if (s.weighIn) for (const d of s.weighDays) await add('weigh', weekly(d, s.weighTime));
+  if (s.workouts) for (const d of trainingWeekdays) await add('workout', weekly(d, s.workoutTime));
+  if (s.water) for (const t of s.waterTimes) await add('water', daily(t));
 }
