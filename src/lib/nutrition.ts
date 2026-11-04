@@ -42,26 +42,31 @@ export function assessPace(p: Profile): Pace | null {
   const diff = p.targetKg - p.weightKg;
   const weeks = p.months * WEEKS_PER_MONTH;
   const weeklyKg = diff / weeks;
-  const abs = Math.abs(weeklyKg);
-  let verdict: PaceVerdict;
-  let comfortable: number;
-  if (diff < 0) {
-    const pct = (abs / p.weightKg) * 100;
-    verdict = pct <= 0.75 ? 'realistic' : pct <= 1 ? 'aggressive' : 'unrealistic';
-    comfortable = p.weightKg * 0.006;
-  } else {
-    verdict = abs <= 0.5 ? 'realistic' : abs <= 0.75 ? 'aggressive' : 'unrealistic';
-    comfortable = 0.35;
-  }
-  const suggestedMonths = Math.max(1, Math.ceil(Math.abs(diff) / comfortable / WEEKS_PER_MONTH));
   const eta = new Date();
   eta.setDate(eta.getDate() + Math.round(weeks * 7));
+
+  if (diff < 0) {
+    // The first weeks of a deficit drop water/glycogen (~1.5% bodyweight, max 2.5 kg) at no calorie cost,
+    // so only the remaining fat part is judged and needs a deficit.
+    const water = Math.min(2.5, p.weightKg * 0.015, Math.abs(diff));
+    const fatKg = Math.abs(diff) - water;
+    const fatWeekly = fatKg / weeks;
+    const pct = (fatWeekly / p.weightKg) * 100;
+    // ≤1%/week is the common evidence-based ceiling for sustainable fat loss; up to 1.5% is hard but possible.
+    const verdict: PaceVerdict = pct <= 1 ? 'realistic' : pct <= 1.5 ? 'aggressive' : 'unrealistic';
+    const suggestedMonths = Math.max(1, Math.ceil(fatKg / (p.weightKg * 0.0085) / WEEKS_PER_MONTH));
+    return { weeklyKg, dailyDelta: (-fatWeekly * KCAL_PER_KG) / 7, verdict, suggestedMonths, eta };
+  }
+
+  const abs = Math.abs(weeklyKg);
+  const verdict: PaceVerdict = abs <= 0.5 ? 'realistic' : abs <= 0.75 ? 'aggressive' : 'unrealistic';
+  const suggestedMonths = Math.max(1, Math.ceil(diff / 0.35 / WEEKS_PER_MONTH));
   return { weeklyKg, dailyDelta: (weeklyKg * KCAL_PER_KG) / 7, verdict, suggestedMonths, eta };
 }
 
 /** Lowest daily intake the app will ever suggest. */
 export function calorieFloor(p: Profile): number {
-  return Math.max(p.sex === 'male' ? 1500 : 1200, Math.round(bmr(p)));
+  return Math.max(p.sex === 'male' ? 1500 : 1200, Math.round(bmr(p) * 0.8));
 }
 
 export interface Targets {
