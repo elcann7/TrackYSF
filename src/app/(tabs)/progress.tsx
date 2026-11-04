@@ -5,29 +5,56 @@ import { ScrollView, StyleSheet, Text, View, useWindowDimensions } from 'react-n
 import Animated, { FadeInDown, useAnimatedStyle, useSharedValue, withDelay, withTiming, Easing } from 'react-native-reanimated';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import Svg, { Circle, Defs, LinearGradient, Path, Stop } from 'react-native-svg';
-import { Button, Card, Icon } from '@/components/ui';
+import { Alert } from 'react-native';
+import { Button, Card, Icon, haptic } from '@/components/ui';
 import { allWeights, dailyTotals, type WeightPoint } from '@/lib/db';
 import { addDays, fromKey, todayKey } from '@/lib/dates';
-import { MONTHS, WEEKDAYS, type TKey } from '@/lib/i18n';
-import { assessPace, weeklyTrend, type Macros } from '@/lib/nutrition';
+import { MONTHS, WEEKDAYS, fmt, type TKey } from '@/lib/i18n';
+import {
+  adaptiveTdee,
+  assessPace,
+  computeTargets,
+  smoothWeights,
+  tdee,
+  weeklyTrend,
+  type AdaptiveResult,
+  type Macros,
+} from '@/lib/nutrition';
 import { useApp } from '@/lib/store';
 import { colors, radius, space, type } from '@/theme';
 
 export default function Progress() {
   const insets = useSafeAreaInsets();
   const db = useSQLiteContext();
-  const { t, lang, targets, profile, dataVersion } = useApp();
+  const { t, lang, targets, profile, dataVersion, setTargets } = useApp();
   const [weights, setWeights] = useState<WeightPoint[]>([]);
   const [days, setDays] = useState<(Macros & { date: string })[]>([]);
+  const [adaptive, setAdaptive] = useState<AdaptiveResult | null>(null);
 
   const week = useMemo(() => Array.from({ length: 7 }, (_, i) => addDays(todayKey(), i - 6)), []);
 
   useFocusEffect(
     useCallback(() => {
-      allWeights(db).then(setWeights);
-      dailyTotals(db, week[0], week[6]).then(setDays);
+      (async () => {
+        const from28 = addDays(todayKey(), -28);
+        const [w, d7, d28] = await Promise.all([
+          allWeights(db),
+          dailyTotals(db, week[0], week[6]),
+          dailyTotals(db, from28, addDays(todayKey(), -1)), // today is still incomplete
+        ]);
+        setWeights(w);
+        setDays(d7);
+        setAdaptive(adaptiveTdee(w.filter((x) => x.date >= from28), d28));
+      })();
     }, [db, week, dataVersion]),
   );
+
+  const applyAdaptive = async () => {
+    if (!adaptive || !profile) return;
+    await setTargets(computeTargets(profile, adaptive.tdee));
+    haptic.success();
+    Alert.alert(t('targetsUpdated'));
+  };
 
   const current = weights.at(-1)?.kg ?? profile?.weightKg ?? 0;
   const first = weights[0]?.kg ?? current;
@@ -81,6 +108,30 @@ export default function Progress() {
             <Text style={styles.tipText}>{t(tip)}</Text>
           </View>
           <Button title={t('logWeight')} icon="scalemass" variant="secondary" onPress={() => router.push('/weight')} />
+        </Card>
+      </Animated.View>
+
+      {/* Adaptive metabolism */}
+      <Animated.View entering={FadeInDown.delay(60).duration(450)}>
+        <Card style={{ gap: space.md }}>
+          <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
+            <Icon name="waveform.path.ecg" size={18} color={colors.accent} />
+            <Text style={[styles.section, { flex: 1 }]}>{t('adaptiveTitle')}</Text>
+            {adaptive && <Text style={styles.adaptiveBig}>{adaptive.tdee}</Text>}
+          </View>
+          <Text style={styles.hint}>
+            {adaptive && profile
+              ? fmt(t('adaptiveBody'), {
+                  d: adaptive.days,
+                  i: adaptive.avgIntake,
+                  w: `${adaptive.weeklyChange >= 0 ? '+' : ''}${adaptive.weeklyChange.toFixed(2)}`,
+                  t: adaptive.tdee,
+                  f: Math.round(tdee(profile)),
+                })
+              : t('adaptiveNeed')}
+          </Text>
+          {adaptive && <Button title={t('applyAdaptive')} variant="secondary" icon="arrow.triangle.2.circlepath" onPress={applyAdaptive} />}
+          <Button title={t('science')} variant="ghost" icon="function" onPress={() => router.push('/science')} />
         </Card>
       </Animated.View>
 
@@ -148,7 +199,10 @@ function WeightChart({ points }: { points: WeightPoint[] }) {
   const t1 = fromKey(points[points.length - 1].date).getTime();
   const xOf = (d: string) => pad + ((fromKey(d).getTime() - t0) / Math.max(1, t1 - t0)) * (W - pad * 2);
   const yOf = (kg: number) => pad + (1 - (kg - min) / (max - min)) * (H - pad * 2);
-  const pts = points.map((p) => [xOf(p.date), yOf(p.kg)] as const);
+  // line = smoothed trend (filters daily water swings); dots = actual weigh-ins
+  const trendKg = smoothWeights(points);
+  const raw = points.map((p) => [xOf(p.date), yOf(p.kg)] as const);
+  const pts = points.map((p, i) => [xOf(p.date), yOf(trendKg[i])] as const);
 
   // smooth path (Catmull-Rom → Bezier)
   let d = `M ${pts[0][0]} ${pts[0][1]}`;
@@ -176,6 +230,9 @@ function WeightChart({ points }: { points: WeightPoint[] }) {
       </Defs>
       <Path d={area} fill="url(#wfill)" />
       <Path d={d} stroke={colors.accent} strokeWidth={2.5} fill="none" strokeLinecap="round" />
+      {raw.map(([x, y], i) => (
+        <Circle key={i} cx={x} cy={y} r={2.5} fill={colors.textDim} opacity={0.6} />
+      ))}
       <Circle cx={last[0]} cy={last[1]} r={5} fill={colors.bg} stroke={colors.accent} strokeWidth={2.5} />
     </Svg>
   );
@@ -189,6 +246,7 @@ const styles = StyleSheet.create({
   statValue: { color: colors.text, fontSize: 22, fontWeight: '700', marginTop: 4, fontVariant: ['tabular-nums'] },
   statUnit: { color: colors.textDim, fontSize: 12, fontWeight: '600' },
   hint: { color: colors.textDim, fontSize: 14 },
+  adaptiveBig: { color: colors.text, fontSize: 22, fontWeight: '800', fontVariant: ['tabular-nums'] },
   goalRow: { flexDirection: 'row', alignItems: 'center', gap: 8 },
   goalText: { flex: 1, color: colors.textDim, fontSize: 13, fontWeight: '600', fontVariant: ['tabular-nums'] },
   tip: { backgroundColor: colors.surfaceHigh, borderRadius: radius.md, padding: space.md },

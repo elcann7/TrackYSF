@@ -24,7 +24,7 @@ export interface WeightPoint {
   kg: number;
 }
 
-const SCHEMA_VERSION = 2;
+const SCHEMA_VERSION = 3;
 
 export async function migrate(db: SQLiteDatabase): Promise<void> {
   const row = await db.getFirstAsync<{ user_version: number }>('PRAGMA user_version');
@@ -49,7 +49,101 @@ export async function migrate(db: SQLiteDatabase): Promise<void> {
       );
     `);
   }
+  if (current < 3) {
+    await db.execAsync(`
+      CREATE TABLE IF NOT EXISTS workouts (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        date TEXT NOT NULL,
+        day_key TEXT NOT NULL,
+        kind TEXT NOT NULL,
+        started_at INTEGER NOT NULL,
+        finished_at INTEGER NOT NULL
+      );
+      CREATE TABLE IF NOT EXISTS workout_sets (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        workout_id INTEGER NOT NULL REFERENCES workouts(id) ON DELETE CASCADE,
+        ex_id TEXT NOT NULL,
+        set_idx INTEGER NOT NULL,
+        weight REAL NOT NULL,
+        reps INTEGER NOT NULL
+      );
+      CREATE INDEX IF NOT EXISTS idx_sets_ex ON workout_sets(ex_id);
+    `);
+  }
   await db.execAsync(`PRAGMA user_version = ${SCHEMA_VERSION}`);
+}
+
+// ---------- workouts ----------
+export interface LoggedSet {
+  exId: string;
+  setIdx: number;
+  weight: number;
+  reps: number;
+}
+
+export interface WorkoutSummary {
+  id: number;
+  date: string;
+  kind: string;
+  started_at: number;
+  finished_at: number;
+  sets: number;
+  volume: number;
+}
+
+export async function saveWorkout(
+  db: SQLiteDatabase,
+  w: { date: string; dayKey: string; kind: string; startedAt: number; sets: LoggedSet[] },
+): Promise<number> {
+  let id = 0;
+  await db.withTransactionAsync(async () => {
+    const r = await db.runAsync(
+      'INSERT INTO workouts (date, day_key, kind, started_at, finished_at) VALUES (?, ?, ?, ?, ?)',
+      w.date,
+      w.dayKey,
+      w.kind,
+      w.startedAt,
+      Date.now(),
+    );
+    id = r.lastInsertRowId;
+    for (const s of w.sets) {
+      await db.runAsync(
+        'INSERT INTO workout_sets (workout_id, ex_id, set_idx, weight, reps) VALUES (?, ?, ?, ?, ?)',
+        id,
+        s.exId,
+        s.setIdx,
+        s.weight,
+        s.reps,
+      );
+    }
+  });
+  return id;
+}
+
+/** Sets from the most recent workout that contained this exercise. */
+export async function lastSetsFor(db: SQLiteDatabase, exId: string): Promise<{ weight: number; reps: number }[]> {
+  return db.getAllAsync<{ weight: number; reps: number }>(
+    `SELECT weight, reps FROM workout_sets
+     WHERE ex_id = ? AND workout_id = (SELECT MAX(workout_id) FROM workout_sets WHERE ex_id = ?)
+     ORDER BY set_idx`,
+    exId,
+    exId,
+  );
+}
+
+export async function recentWorkouts(db: SQLiteDatabase, limit = 20): Promise<WorkoutSummary[]> {
+  return db.getAllAsync<WorkoutSummary>(
+    `SELECT w.id, w.date, w.kind, w.started_at, w.finished_at,
+            COUNT(s.id) AS sets, COALESCE(SUM(s.weight * s.reps), 0) AS volume
+     FROM workouts w LEFT JOIN workout_sets s ON s.workout_id = w.id
+     GROUP BY w.id ORDER BY w.started_at DESC LIMIT ?`,
+    limit,
+  );
+}
+
+export async function workoutDates(db: SQLiteDatabase, from: string, to: string): Promise<Set<string>> {
+  const rows = await db.getAllAsync<{ date: string }>('SELECT DISTINCT date FROM workouts WHERE date BETWEEN ? AND ?', from, to);
+  return new Set(rows.map((r) => r.date));
 }
 
 async function migrateV1(db: SQLiteDatabase): Promise<void> {
@@ -261,5 +355,7 @@ export async function deleteWeight(db: SQLiteDatabase, date: string): Promise<vo
 }
 
 export async function eraseAll(db: SQLiteDatabase): Promise<void> {
-  await db.execAsync('DELETE FROM entries; DELETE FROM weights; DELETE FROM kv; DELETE FROM my_foods;');
+  await db.execAsync(
+    'DELETE FROM entries; DELETE FROM weights; DELETE FROM kv; DELETE FROM my_foods; DELETE FROM workout_sets; DELETE FROM workouts;',
+  );
 }

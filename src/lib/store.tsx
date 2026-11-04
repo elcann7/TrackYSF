@@ -4,7 +4,7 @@ import { useSQLiteContext } from 'expo-sqlite';
 import { createContext, useCallback, useContext, useEffect, useMemo, useState, type ReactNode } from 'react';
 import { kvGet, kvSet } from './db';
 import { translate, type Lang, type TKey } from './i18n';
-import type { Profile, Targets } from './nutrition';
+import { migrateProfile, type Profile, type Targets } from './nutrition';
 
 const KEY_STORE = 'gemini_api_key';
 
@@ -50,7 +50,7 @@ export function AppStateProvider({ children }: { children: ReactNode }) {
         SecureStore.getItemAsync(KEY_STORE).catch(() => null),
       ]);
       if (l) setLangState(l);
-      setProfile(p);
+      setProfile(p ? migrateProfile(p) : null);
       setTargetsState(tg);
       setApiKeyState(stored || process.env.EXPO_PUBLIC_GEMINI_API_KEY || '');
       setReady(true);

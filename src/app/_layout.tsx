@@ -23,6 +23,19 @@ function RootStack() {
         <Stack.Screen name="add" options={{ presentation: 'modal' }} />
         <Stack.Screen name="profile" options={{ presentation: 'fullScreenModal' }} />
         <Stack.Screen name="create-food" options={{ presentation: 'modal' }} />
+        <Stack.Screen name="program-setup" options={{ presentation: 'modal' }} />
+        <Stack.Screen name="science" options={{ presentation: 'modal' }} />
+        <Stack.Screen name="workout/[key]" options={{ presentation: 'fullScreenModal', gestureEnabled: false }} />
+        <Stack.Screen
+          name="exercise/[id]"
+          options={{
+            presentation: 'formSheet',
+            sheetAllowedDetents: [0.85, 1],
+            sheetGrabberVisible: true,
+            sheetCornerRadius: 28,
+            contentStyle: { backgroundColor: colors.surface },
+          }}
+        />
         <Stack.Screen
           name="food-amount"
           options={{

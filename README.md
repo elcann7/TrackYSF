@@ -10,6 +10,10 @@ Personal iOS calorie & macro tracker. Snap a meal, optionally add what's inside 
 - **Quick add**: enter calories (and optional macros) directly.
 - **My foods**: create your own foods/recipes (values per 100 g/ml or per serving).
 - **Recent foods**: one-tap re-add.
+- **Science-based energy model**: Mifflin-St Jeor (or Katch-McArdle with body-fat %), FAO/WHO lifestyle PAL kept separate from training (MET method), age groups (teen / adult / 40+ / 65+) change calorie floor, fat-loss and gain ceilings and protein; gain rate depends on training experience (Iraki 2019) and BMI. A "How it's calculated" screen shows every formula with your own numbers.
+- **Adaptive TDEE**: after ~2 weeks of logging, real expenditure is measured from intake and the smoothed weight trend (energy balance) and can replace the formula.
+- **Training programs**: generated from days/week, session length, experience, age and equipment (gym / dumbbells / bodyweight). Full body → Upper/Lower → U/L+PPL → PPL ×2, each muscle ~2×/week, compounds first, RIR 1–3, rest 2–3 min for compounds. 40+ exercises with animated start/end images ([free-exercise-db](https://github.com/yuhonas/free-exercise-db), public domain) and AZ/EN technique cues.
+- **Workout logger**: sets/reps/kg, last session, double-progression suggestion, rest timer, history.
 - **Progress**: weight log (0.1 kg ruler), smoothed chart, weekly trend with guidance, 7-day calorie bars and averages.
 - **Settings**: AZ / EN interface, targets, profile, Gemini API key (stored in the iOS Keychain), erase data.
 - Everything is stored locally in SQLite. No server, no account.

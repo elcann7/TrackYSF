@@ -100,6 +100,7 @@ export default function Settings() {
             {dirty ? <Button title={t('save')} onPress={saveTargets} style={{ paddingHorizontal: space.xl }} /> : null}
           </View>
           <Button title={t('editProfile')} variant="ghost" icon="person.crop.circle" onPress={() => router.push('/profile')} />
+          <Button title={t('science')} variant="ghost" icon="function" onPress={() => router.push('/science')} />
         </Section>
       )}
 

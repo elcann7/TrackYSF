@@ -22,11 +22,35 @@ import { Button, Icon, PressableScale, Segmented, haptic } from '@/components/ui
 import { setWeight } from '@/lib/db';
 import { todayKey } from '@/lib/dates';
 import { MONTHS, fmt, type TKey } from '@/lib/i18n';
-import { assessPace, computeTargets, type Activity, type Goal, type Pace, type Profile, type Sex } from '@/lib/nutrition';
+import {
+  assessPace,
+  computeTargets,
+  exerciseKcalPerDay,
+  type Experience,
+  type Goal,
+  type Lifestyle,
+  type Pace,
+  type Profile,
+  type Sex,
+} from '@/lib/nutrition';
 import { useApp } from '@/lib/store';
 import { colors, radius, space, type } from '@/theme';
 
-const ALL_STEPS = ['welcome', 'sex', 'age', 'height', 'weight', 'activity', 'goal', 'target', 'pace', 'plan'] as const;
+const ALL_STEPS = [
+  'welcome',
+  'sex',
+  'age',
+  'height',
+  'weight',
+  'bodyfat',
+  'lifestyle',
+  'training',
+  'experience',
+  'goal',
+  'target',
+  'pace',
+  'plan',
+] as const;
 type Step = (typeof ALL_STEPS)[number];
 
 /** Sensible starting target + timeframe when a goal is picked. */
@@ -48,7 +72,18 @@ export default function Onboarding() {
   const [i, setI] = useState(editing ? 1 : 0);
   const [dir, setDir] = useState<1 | -1>(1);
   const [p, setP] = useState<Profile>(
-    existing ?? { sex: 'male', age: 20, heightCm: 172, weightKg: 65, activity: 'moderate', goal: 'gain' },
+    existing ?? {
+      sex: 'male',
+      age: 20,
+      heightCm: 172,
+      weightKg: 65,
+      goal: 'maintain',
+      lifestyle: 'desk',
+      trainingDays: 3,
+      sessionMin: 60,
+      experience: 'beginner',
+      bodyFat: null,
+    },
   );
   const STEPS = useMemo<Step[]>(
     () => ALL_STEPS.filter((s) => p.goal !== 'maintain' || (s !== 'target' && s !== 'pace')),
@@ -181,29 +216,111 @@ export default function Onboarding() {
           </Question>
         )}
 
-        {step === 'activity' && (
-          <Question title={t('activityQ')}>
+        {step === 'lifestyle' && (
+          <Question title={t('lifestyleQ')} sub={t('lifestyleSub')}>
             <ScrollView contentContainerStyle={{ gap: space.sm }} showsVerticalScrollIndicator={false}>
               {(
                 [
-                  ['sedentary', 'chair.lounge'],
-                  ['light', 'figure.walk'],
-                  ['moderate', 'figure.strengthtraining.traditional'],
-                  ['active', 'figure.run'],
-                  ['athlete', 'flame'],
-                ] as [Activity, SFSymbol][]
+                  ['desk', 'laptopcomputer'],
+                  ['mixed', 'figure.walk'],
+                  ['onFeet', 'figure.walk.motion'],
+                  ['physical', 'hammer.fill'],
+                ] as [Lifestyle, SFSymbol][]
               ).map(([a, icon], idx) => (
                 <Animated.View key={a} entering={FadeInDown.delay(60 * idx).duration(400)}>
                   <ChoiceCard
                     icon={icon}
-                    title={t(`act_${a}` as TKey)}
-                    desc={t(`act_${a}_d` as TKey)}
-                    selected={p.activity === a}
-                    onPress={() => setP({ ...p, activity: a })}
+                    title={t(`life_${a}` as TKey)}
+                    desc={t(`life_${a}_d` as TKey)}
+                    selected={p.lifestyle === a}
+                    onPress={() => setP({ ...p, lifestyle: a })}
                   />
                 </Animated.View>
               ))}
             </ScrollView>
+          </Question>
+        )}
+
+        {step === 'training' && (
+          <Question title={t('trainingQ')} sub={t('trainingSub')}>
+            <Text style={styles.smallLabel}>{t('daysPerWeek')}</Text>
+            <View style={styles.dayRow}>
+              {[0, 1, 2, 3, 4, 5, 6].map((n) => (
+                <PressableScale
+                  key={n}
+                  onPress={() => {
+                    haptic.select();
+                    setP({ ...p, trainingDays: n });
+                  }}
+                  hapticOnPress={false}
+                  style={[styles.dayChip, p.trainingDays === n && styles.dayChipSel]}
+                >
+                  <Text style={[styles.dayChipText, p.trainingDays === n && { color: colors.onAccent }]}>{n}</Text>
+                </PressableScale>
+              ))}
+            </View>
+            {p.trainingDays > 0 && (
+              <Animated.View entering={FadeIn.duration(250)} style={{ marginTop: space.xl }}>
+                <Text style={styles.smallLabel}>{t('sessionLength')}</Text>
+                <Segmented
+                  options={[30, 45, 60, 75, 90].map((m) => ({ value: String(m), label: `${m}′` }))}
+                  value={String(p.sessionMin)}
+                  onChange={(v) => setP({ ...p, sessionMin: Number(v) })}
+                />
+              </Animated.View>
+            )}
+            <Text style={[styles.qSub, { marginTop: space.xl }]}>
+              {fmt(t('trainingKcalNote'), { n: Math.round(exerciseKcalPerDay(p)) })}
+            </Text>
+          </Question>
+        )}
+
+        {step === 'experience' && (
+          <Question title={t('experienceQ')} sub={t('experienceSub')}>
+            <View style={{ gap: space.sm }}>
+              {(
+                [
+                  ['beginner', 'leaf'],
+                  ['intermediate', 'chart.line.uptrend.xyaxis'],
+                  ['advanced', 'trophy'],
+                ] as [Experience, SFSymbol][]
+              ).map(([x, icon], idx) => (
+                <Animated.View key={x} entering={FadeInDown.delay(70 * idx).duration(400)}>
+                  <ChoiceCard
+                    icon={icon}
+                    title={t(`exp_${x}` as TKey)}
+                    desc={t(`exp_${x}_d` as TKey)}
+                    selected={p.experience === x}
+                    onPress={() => setP({ ...p, experience: x })}
+                  />
+                </Animated.View>
+              ))}
+            </View>
+          </Question>
+        )}
+
+        {step === 'bodyfat' && (
+          <Question title={t('bodyFatQ')} sub={t('bodyFatSub')} fullBleed>
+            {p.bodyFat != null ? (
+              <RulerPicker
+                min={4}
+                max={50}
+                value={p.bodyFat}
+                majorEvery={5}
+                unit="%"
+                onChange={(v) => setP((x) => ({ ...x, bodyFat: v }))}
+              />
+            ) : null}
+            <View style={{ paddingHorizontal: space.xl, marginTop: space.xl }}>
+              <Segmented
+                options={[
+                  { value: 'no', label: t('bodyFatUnknown') },
+                  { value: 'yes', label: t('bodyFatKnown') },
+                ]}
+                value={p.bodyFat != null ? 'yes' : 'no'}
+                onChange={(v) => setP({ ...p, bodyFat: v === 'yes' ? (p.sex === 'male' ? 18 : 28) : null })}
+              />
+            </View>
           </Question>
         )}
 
@@ -490,6 +607,19 @@ const styles = StyleSheet.create({
   },
   planMacroLabel: { color: colors.textDim, fontSize: 13, fontWeight: '600' },
   footer: { paddingHorizontal: space.xl, paddingTop: space.md },
+  dayRow: { flexDirection: 'row', gap: 8 },
+  dayChip: {
+    flex: 1,
+    height: 52,
+    borderRadius: radius.md,
+    backgroundColor: colors.surface,
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: colors.hairline,
+  },
+  dayChipSel: { backgroundColor: colors.accent, borderColor: colors.accent },
+  dayChipText: { color: colors.text, fontSize: 18, fontWeight: '700', fontVariant: ['tabular-nums'] },
   paceCard: {
     marginTop: space.xl,
     padding: space.lg,
