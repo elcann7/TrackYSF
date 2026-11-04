@@ -4,10 +4,10 @@ import { useEffect, useRef, useState } from 'react';
 import { Alert, ScrollView, StyleSheet, Switch, Text, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { TimeField, WeekdayPicker } from '@/components/TimeField';
-import { Card, Icon, PressableScale, haptic } from '@/components/ui';
+import { Button, Card, Icon, PressableScale, haptic } from '@/components/ui';
 import { kvGet, kvSet } from '@/lib/db';
 import { WEEKDAYS } from '@/lib/i18n';
-import { applyReminders, ensurePermission, normalizeReminders, type ReminderSettings } from '@/lib/reminders';
+import { applyReminders, ensurePermission, normalizeReminders, sendTestNotification, type ReminderSettings } from '@/lib/reminders';
 import { useApp } from '@/lib/store';
 import type { Program } from '@/lib/training';
 import { colors, space } from '@/theme';
@@ -57,6 +57,15 @@ export default function Reminders() {
         <View style={{ width: 36 }} />
       </View>
       <ScrollView contentContainerStyle={{ padding: space.lg, gap: space.lg, paddingBottom: insets.bottom + 40 }}>
+        <Button
+          title={t('testNotification')}
+          variant="secondary"
+          icon="bell.and.waves.left.and.right"
+          onPress={async () => {
+            const ok = await sendTestNotification(lang);
+            Alert.alert(ok ? t('testNotificationSent') : t('remDenied'));
+          }}
+        />
         {/* meals */}
         <Card style={{ padding: 0 }}>
           <ToggleRow icon="fork.knife" label={t('remMeals')} value={s.meals} onChange={(v) => update({ meals: v }, v)} />

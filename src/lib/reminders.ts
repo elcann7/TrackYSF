@@ -101,6 +101,16 @@ const weekly = (weekday: number, time: string): Notifications.NotificationTrigge
   ...parseTime(time),
 });
 
+/** Fires one notification in 5 seconds, to verify permissions/delivery on this device. */
+export async function sendTestNotification(lang: Lang): Promise<boolean> {
+  if (!(await ensurePermission())) return false;
+  await Notifications.scheduleNotificationAsync({
+    content: { title: 'TrackYSF', body: lang === 'az' ? 'Bildirişlər işləyir ✓' : 'Notifications work ✓' },
+    trigger: { type: Notifications.SchedulableTriggerInputTypes.TIME_INTERVAL, seconds: 5 },
+  });
+  return true;
+}
+
 /** Cancels everything and schedules the enabled reminders again (idempotent). */
 export async function applyReminders(s: ReminderSettings, lang: Lang, trainingWeekdays: number[]): Promise<void> {
   await Notifications.cancelAllScheduledNotificationsAsync();
