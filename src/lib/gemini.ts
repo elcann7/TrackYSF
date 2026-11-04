@@ -17,6 +17,11 @@ export interface Analysis {
   model: string;
 }
 
+/** Keys copied on a phone often carry spaces, line breaks or invisible characters; HTTP headers reject them. */
+export function cleanKey(k: string): string {
+  return k.replace(/[^!-~]/g, '');
+}
+
 export type AnalyzeErrorCode = 'busy' | 'rate' | 'key' | 'net' | 'generic';
 
 export class AnalyzeError extends Error {
@@ -90,7 +95,7 @@ async function callModel(model: string, input: AnalyzeInput, signal: AbortSignal
     res = await fetch(`${ENDPOINT}/${model}:generateContent`, {
       method: 'POST',
       signal,
-      headers: { 'Content-Type': 'application/json', 'x-goog-api-key': input.apiKey },
+      headers: { 'Content-Type': 'application/json', 'x-goog-api-key': cleanKey(input.apiKey) },
       body: JSON.stringify({
         contents: [{ role: 'user', parts }],
         generationConfig: {
@@ -173,6 +178,29 @@ export async function analyzeMeal(input: AnalyzeInput): Promise<Analysis> {
     }
   }
   throw lastErr;
+}
+
+/** Which hosts are reachable from the device: separates "no internet" from "Google API blocked". */
+export async function networkProbe(): Promise<string> {
+  const targets: [string, string][] = [
+    ['Google', 'https://www.google.com/generate_204'],
+    ['Gemini API', `${ENDPOINT}?pageSize=1`],
+    ['Open Food Facts', 'https://world.openfoodfacts.org/api/v2/product/5449000000996.json?fields=code'],
+  ];
+  const lines: string[] = [];
+  for (const [name, url] of targets) {
+    const ctrl = new AbortController();
+    const timer = setTimeout(() => ctrl.abort(), 8000);
+    try {
+      const r = await fetch(url, { signal: ctrl.signal });
+      lines.push(`${name}: HTTP ${r.status}`);
+    } catch (e) {
+      lines.push(`${name}: ✗ ${(e as Error)?.message ?? String(e)}`);
+    } finally {
+      clearTimeout(timer);
+    }
+  }
+  return lines.join('\n');
 }
 
 /** Cheap text-only call used by the "Test key" button. */

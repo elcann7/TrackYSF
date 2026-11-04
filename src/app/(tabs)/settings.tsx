@@ -9,7 +9,7 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Button, Card, Segmented, haptic } from '@/components/ui';
 import { eraseAll, exportAll, importAll } from '@/lib/db';
 import { todayKey } from '@/lib/dates';
-import { AnalyzeError, testKey } from '@/lib/gemini';
+import { AnalyzeError, networkProbe, testKey } from '@/lib/gemini';
 import type { Lang } from '@/lib/i18n';
 import { computeTargets, type Targets } from '@/lib/nutrition';
 import { useApp } from '@/lib/store';
@@ -44,13 +44,19 @@ export default function Settings() {
     setTesting(true);
     try {
       await setApiKey(key);
-      await testKey(key.trim());
+      await testKey(key);
       haptic.success();
       Alert.alert(t('keyOk'));
     } catch (e) {
       haptic.error();
       const code = e instanceof AnalyzeError ? e.code : 'generic';
-      Alert.alert(code === 'key' ? t('errKey') : code === 'busy' ? t('errBusy') : code === 'net' ? t('errNet') : t('errGeneric'));
+      const title = code === 'key' ? t('errKey') : code === 'busy' ? t('errBusy') : code === 'net' ? t('errNet') : t('errGeneric');
+      // show the technical reason + a quick reachability probe so connection problems can be diagnosed
+      const detail = e instanceof Error ? e.message.slice(0, 300) : String(e).slice(0, 300);
+      const probe = code === 'net' ? `
+
+${await networkProbe()}` : '';
+      Alert.alert(title, `${detail}${probe}`);
     } finally {
       setTesting(false);
     }

@@ -4,6 +4,7 @@ import { useSQLiteContext } from 'expo-sqlite';
 import { createContext, useCallback, useContext, useEffect, useMemo, useState, type ReactNode } from 'react';
 import { kvGet, kvSet } from './db';
 import { translate, type Lang, type TKey } from './i18n';
+import { cleanKey } from './gemini';
 import { migrateProfile, type Profile, type Targets } from './nutrition';
 
 const KEY_STORE = 'gemini_api_key';
@@ -54,7 +55,7 @@ export function AppStateProvider({ children }: { children: ReactNode }) {
     setProfile(p ? migrateProfile(p) : null);
     setTargetsState(tg);
     // Each user brings their own free key (Settings). The env fallback only exists in local dev builds.
-    setApiKeyState(stored || process.env.EXPO_PUBLIC_GEMINI_API_KEY || '');
+    setApiKeyState(cleanKey(stored || process.env.EXPO_PUBLIC_GEMINI_API_KEY || ''));
     setDataVersion((v) => v + 1);
     setReady(true);
   }, [db]);
@@ -90,7 +91,7 @@ export function AppStateProvider({ children }: { children: ReactNode }) {
   );
 
   const setApiKey = useCallback(async (k: string) => {
-    const v = k.trim();
+    const v = cleanKey(k);
     setApiKeyState(v);
     if (v) await SecureStore.setItemAsync(KEY_STORE, v);
     else await SecureStore.deleteItemAsync(KEY_STORE);
