@@ -1,7 +1,8 @@
 import { useLocalSearchParams } from 'expo-router';
-import { ScrollView, StyleSheet, Text, View } from 'react-native';
+import { Linking, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { ExerciseAnim } from '@/components/ExerciseAnim';
-import { EXERCISES, MUSCLE_NAMES, exerciseName } from '@/lib/training';
+import { Button, Icon } from '@/components/ui';
+import { EXERCISES, MISTAKES, MUSCLE_NAMES, exerciseName, videoSearchUrl } from '@/lib/training';
 import { useApp } from '@/lib/store';
 import { colors, radius, space, type } from '@/theme';
 
@@ -33,8 +34,26 @@ export default function ExerciseSheet() {
               </View>
             ))}
           </View>
+          {MISTAKES[id] && (
+            <>
+              <Text style={styles.section}>{t('commonMistakes')}</Text>
+              <View style={{ gap: space.sm }}>
+                {MISTAKES[id][lang].map((c, i) => (
+                  <View key={i} style={styles.cue}>
+                    <Icon name="xmark.circle.fill" size={20} color={colors.danger} />
+                    <Text style={styles.cueText}>{c}</Text>
+                  </View>
+                ))}
+              </View>
+            </>
+          )}
+          <View style={styles.breath}>
+            <Icon name="wind" size={18} color={colors.accent} />
+            <Text style={styles.cueText}>{t(info.timed ? 'breathingHold' : 'breathing')}</Text>
+          </View>
         </>
       )}
+      <Button title={t('watchVideo')} variant="secondary" icon="play.rectangle.fill" onPress={() => Linking.openURL(videoSearchUrl(id))} />
       <Text style={styles.credit}>Images: free-exercise-db (public domain)</Text>
     </ScrollView>
   );
@@ -51,5 +70,6 @@ const styles = StyleSheet.create({
   num: { width: 26, height: 26, borderRadius: 13, backgroundColor: colors.surfaceHigh, alignItems: 'center', justifyContent: 'center' },
   numText: { color: colors.text, fontSize: 13, fontWeight: '700' },
   cueText: { flex: 1, color: colors.text, fontSize: 15, lineHeight: 22 },
+  breath: { flexDirection: 'row', gap: space.md, alignItems: 'flex-start', backgroundColor: colors.surfaceHigh, borderRadius: radius.md, padding: space.md },
   credit: { color: colors.textFaint, fontSize: 11, marginTop: space.md },
 });

@@ -381,9 +381,10 @@ const DAY_SLOTS: Record<DayKind, Slot[]> = {
   fullA: ['squat', 'hPush', 'vPull', 'hinge', 'sideDelt', 'biceps', 'core'],
   fullB: ['hinge', 'vPush', 'hPull', 'squatAlt', 'triceps', 'calves', 'core'],
   fullC: ['squatAlt', 'inclinePush', 'vPull', 'glute', 'rearDelt', 'biceps', 'triceps'],
-  upperA: ['hPush', 'vPull', 'inclinePush', 'hPull', 'sideDelt', 'biceps', 'triceps'],
+  // arms alternate between the two upper days so both get direct work even in short sessions
+  upperA: ['hPush', 'vPull', 'inclinePush', 'hPull', 'sideDelt', 'triceps', 'biceps'],
   lowerA: ['squat', 'hinge', 'quadIso', 'hamIso', 'calves', 'core'],
-  upperB: ['vPush', 'hPull', 'vPull', 'chestIso', 'sideDelt', 'rearDelt', 'tricepsOH', 'biceps2'],
+  upperB: ['vPush', 'hPull', 'vPull', 'chestIso', 'biceps2', 'tricepsOH', 'sideDelt', 'rearDelt'],
   lowerB: ['squatAlt', 'glute', 'hamIso', 'quadIso', 'calves', 'core'],
   push: ['hPush', 'vPush', 'inclinePush', 'sideDelt', 'triceps', 'tricepsOH'],
   pull: ['vPull', 'hPull', 'hPull2', 'rearDelt', 'biceps', 'biceps2'],
@@ -396,6 +397,16 @@ export const DAY_TITLES: Record<Lang, Record<DayKind, string>> = {
 };
 
 export type Split = 'full' | 'ul' | 'ulppl' | 'ppl';
+export type TrainingGoal = 'muscle' | 'strength' | 'fitness';
+export type Limitation = 'knees' | 'lowerBack' | 'shoulders';
+
+export interface ProgramOptions {
+  equipment: Equipment;
+  goal: TrainingGoal;
+  /** Muscles to prioritise (max 3). */
+  priorities: Muscle[];
+  limitations: Limitation[];
+}
 
 export interface PlannedExercise {
   id: string;
@@ -403,6 +414,8 @@ export interface PlannedExercise {
   repMin: number;
   repMax: number;
   restSec: number;
+  /** Added or boosted because the user prioritised this muscle. */
+  priority?: boolean;
 }
 
 export interface ProgramDay {
@@ -414,12 +427,16 @@ export interface ProgramDay {
 }
 
 export interface Program {
-  version: 1;
+  version: 2;
   createdAt: number;
+  options: ProgramOptions;
   equipment: Equipment;
   split: Split;
   days: ProgramDay[];
+  /** Typical hard sets per muscle per week for this level. */
   setsPerMuscle: number;
+  /** Actual weekly sets per muscle in this program (primary = 1, secondary = 0.5). */
+  weeklySets: Record<Muscle, number>;
 }
 
 const WEEKDAYS_BY_COUNT: Record<number, number[]> = {
@@ -442,41 +459,228 @@ const SPLITS: Record<number, { split: Split; kinds: DayKind[] }> = {
 
 const MAX_EXERCISES: Record<number, number> = { 30: 4, 45: 5, 60: 6, 75: 7, 90: 8 };
 
-export function generateProgram(profile: Profile, equipment: Equipment): Program | null {
+/**
+ * Joint-friendly substitutes. Knees: less deep knee flexion under load; lower back: no heavy spinal
+ * loading; shoulders: no overhead pressing, deep dips or deep flyes.
+ */
+const SUBSTITUTE: Record<Limitation, Record<string, string | null>> = {
+  // Quads are still trained (strong quads protect the knee), but with stable, controllable machines
+  // and a pain-free range instead of deep loaded squats and lunges.
+  knees: {
+    Barbell_Squat: 'Leg_Press',
+    Split_Squat_with_Dumbbells: 'Goblet_Squat',
+    Split_Squats: 'Bodyweight_Squat',
+    Dumbbell_Lunges: 'Single_Leg_Glute_Bridge',
+    Bodyweight_Walking_Lunge: 'Single_Leg_Glute_Bridge',
+  },
+  lowerBack: {
+    Barbell_Squat: 'Leg_Press',
+    Romanian_Deadlift: 'Lying_Leg_Curls',
+    'Stiff-Legged_Dumbbell_Deadlift': 'Single_Leg_Glute_Bridge',
+    Standing_Military_Press: 'Seated_Dumbbell_Press',
+    Hanging_Leg_Raise: 'Plank',
+  },
+  shoulders: {
+    Standing_Military_Press: 'Incline_Dumbbell_Press',
+    Seated_Dumbbell_Press: 'Incline_Dumbbell_Press',
+    'Decline_Push-Up': 'Pushups',
+    'Barbell_Bench_Press_-_Medium_Grip': 'Dumbbell_Bench_Press',
+    Bench_Dips: 'Triceps_Pushdown',
+    Dumbbell_Flyes: null,
+    Cable_Crossover: null,
+  },
+};
+
+/** Extra exercise per prioritised muscle: [gym, dumbbells, bodyweight]. */
+const PRIORITY_EXTRA: Record<Muscle, [string | null, string | null, string | null]> = {
+  chest: ['Cable_Crossover', 'Dumbbell_Flyes', 'Decline_Push-Up'],
+  back: ['One-Arm_Dumbbell_Row', 'One-Arm_Dumbbell_Row', 'Inverted_Row'],
+  shoulders: ['Side_Lateral_Raise', 'Side_Lateral_Raise', 'Decline_Push-Up'],
+  quads: ['Leg_Extensions', 'Split_Squat_with_Dumbbells', 'Split_Squats'],
+  hamstrings: ['Lying_Leg_Curls', 'Stiff-Legged_Dumbbell_Deadlift', 'Single_Leg_Glute_Bridge'],
+  glutes: ['Barbell_Hip_Thrust', 'Single_Leg_Glute_Bridge', 'Single_Leg_Glute_Bridge'],
+  calves: ['Standing_Calf_Raises', 'Calf_Raise_On_A_Dumbbell', 'Calf_Raise_On_A_Dumbbell'],
+  biceps: ['Hammer_Curls', 'Hammer_Curls', 'Chin-Up'],
+  triceps: ['Triceps_Overhead_Extension_with_Rope', 'Dumbbell_One-Arm_Triceps_Extension', 'Bench_Dips'],
+  abs: ['Hanging_Leg_Raise', 'Crunches', 'Plank'],
+};
+
+export const ALL_MUSCLES: Muscle[] = ['chest', 'back', 'shoulders', 'biceps', 'triceps', 'quads', 'hamstrings', 'glutes', 'calves', 'abs'];
+
+function applyLimits(id: string, limits: Limitation[]): string | null {
+  let cur: string | null = id;
+  for (let pass = 0; pass < 3 && cur; pass++) {
+    let changed = false;
+    for (const l of limits) {
+      if (cur && cur in SUBSTITUTE[l]) {
+        cur = SUBSTITUTE[l][cur];
+        changed = true;
+      }
+    }
+    if (!changed) break;
+  }
+  return cur;
+}
+
+export function generateProgram(profile: Profile, options: ProgramOptions): Program | null {
   const days = Math.min(6, Math.max(0, profile.trainingDays));
   if (days === 0) return null;
   const { split, kinds } = SPLITS[days];
+  const { equipment, goal, priorities, limitations } = options;
   const eqIdx = equipment === 'gym' ? 0 : equipment === 'dumbbells' ? 1 : 2;
   const maxEx = MAX_EXERCISES[profile.sessionMin] ?? 6;
   const exp: Experience = profile.experience;
   const older = profile.age >= 50;
   const teen = profile.age < 18;
+  const hitsPriority = (id: string) => priorities.includes(EXERCISES[id]?.muscles[0] as Muscle);
 
   const plan = kinds.map((kind, i): ProgramDay => {
     const ids: string[] = [];
     for (const slot of DAY_SLOTS[kind]) {
-      const id = SLOTS[slot][eqIdx];
+      const raw = SLOTS[slot][eqIdx];
+      const id = raw ? applyLimits(raw, limitations) : null;
       if (id && !ids.includes(id)) ids.push(id);
     }
-    // compounds first (freshest when the load is highest), then isolation; keep slot order inside each group
-    const ordered = [...ids.filter((id) => EXERCISES[id]?.compound), ...ids.filter((id) => !EXERCISES[id]?.compound)];
-    const exercises = ordered.slice(0, maxEx).map((id): PlannedExercise => {
+
+    // priority principle: one extra exercise for each prioritised muscle this day already trains
+    const dayMuscles = new Set(ids.flatMap((id) => EXERCISES[id]?.muscles ?? []));
+    const extras: string[] = [];
+    for (const m of priorities) {
+      if (!dayMuscles.has(m)) continue;
+      const raw = PRIORITY_EXTRA[m][eqIdx];
+      const id = raw ? applyLimits(raw, limitations) : null;
+      if (id && !ids.includes(id) && !extras.includes(id)) extras.push(id);
+    }
+
+    // order: prioritised compounds → other compounds → prioritised isolation → other isolation
+    const all = [...ids, ...extras];
+    const isPrio = (id: string) => hitsPriority(id) || extras.includes(id);
+    const rank = (id: string) => (EXERCISES[id]?.compound ? 0 : 2) + (isPrio(id) ? 0 : 1);
+    let chosen = all
+      .map((id, idx) => ({ id, idx }))
+      .sort((a, b) => rank(a.id) - rank(b.id) || a.idx - b.idx)
+      .map((x) => x.id);
+
+    // session-length cap; priority work is never what gets cut
+    const cap = maxEx + (extras.length > 0 ? 1 : 0);
+    while (chosen.length > cap) {
+      let dropAt = chosen.length - 1;
+      for (let k = chosen.length - 1; k >= 0; k--) {
+        if (!isPrio(chosen[k])) {
+          dropAt = k;
+          break;
+        }
+      }
+      chosen = chosen.filter((_, k) => k !== dropAt);
+    }
+
+    const mainLift = chosen.find((id) => EXERCISES[id]?.compound);
+    const exercises = chosen.map((id): PlannedExercise => {
       const info = EXERCISES[id];
       const compound = info?.compound ?? false;
-      // sets: trained lifters need more volume; frequency 2×/wk means per-session sets stay moderate
-      const sets = compound ? (exp === 'advanced' ? 4 : 3) : exp === 'beginner' ? 2 : 3;
-      // reps: heavier ranges for compounds; teens/older adults and beginners use moderate loads
+      const prio = isPrio(id);
+      const isMain = id === mainLift;
+      // sets: trained lifters need more volume; frequency 2×/wk keeps per-session sets moderate
+      let sets = compound ? (exp === 'advanced' ? 4 : 3) : exp === 'beginner' ? 2 : 3;
+      // reps: heavier ranges for compounds; teens, 50+ and beginners use moderate loads
       const heavyOk = !older && !teen && exp !== 'beginner';
       let [repMin, repMax] = compound ? (heavyOk ? [6, 10] : [8, 12]) : [10, 15];
+      let restSec = compound ? (info?.lower ? 180 : 150) : 75;
+      if (goal === 'strength' && isMain) {
+        // strength: the day's main lift goes heavy; assistance work stays in the hypertrophy range
+        [repMin, repMax] = heavyOk ? [4, 6] : [6, 8];
+        sets = Math.max(sets, 4);
+        restSec = 210;
+      }
+      if (goal === 'fitness') {
+        sets = Math.max(2, sets - 1);
+        [repMin, repMax] = compound ? [10, 12] : [12, 15];
+        restSec = compound ? 90 : 60;
+      }
+      if (prio && goal !== 'fitness') sets += 1; // specialisation: more weekly volume for weak points
       if (info?.timed) [repMin, repMax] = [30, 60];
-      const restSec = compound ? (info?.lower ? 180 : 150) : 75;
-      return { id, sets, repMin, repMax, restSec };
+      return { id, sets, repMin, repMax, restSec, priority: prio };
     });
     return { key: `${kind}-${i}`, kind, weekday: WEEKDAYS_BY_COUNT[days][i], exercises };
   });
 
+  const weeklySets = Object.fromEntries(ALL_MUSCLES.map((m) => [m, 0])) as Record<Muscle, number>;
+  for (const d of plan)
+    for (const e of d.exercises)
+      (EXERCISES[e.id]?.muscles ?? []).forEach((m, idx) => {
+        weeklySets[m] += idx === 0 ? e.sets : e.sets / 2;
+      });
+
   const setsPerMuscle = exp === 'beginner' ? 10 : exp === 'intermediate' ? 14 : 18;
-  return { version: 1, createdAt: Date.now(), equipment, split, days: plan, setsPerMuscle };
+  return { version: 2, createdAt: Date.now(), options, equipment, split, days: plan, setsPerMuscle, weeklySets };
+}
+
+type Mistakes = { en: string[]; az: string[] };
+const m = (en: string[], az: string[]): Mistakes => ({ en, az });
+
+/** Most common technique errors, written for beginners. */
+export const MISTAKES: Record<string, Mistakes> = {
+  Barbell_Squat: m(
+    ['Knees caving inward on the way up.', 'Heels lifting / weight shifting onto the toes.', 'Rounding the lower back at the bottom ("butt wink") with heavy load.'],
+    ['Qalxanda dizlərin içəri düşməsi.', 'Dabanların qalxması, çəkinin barmaqlara keçməsi.', 'Ağır çəkidə aşağıda belin yumrulanması.'],
+  ),
+  Goblet_Squat: m(['Chest collapsing forward.', 'Going only a quarter of the way down.'], ['Sinənin irəli yıxılması.', 'Yalnız dörddə bir qədər enmək.']),
+  Bodyweight_Squat: m(['Rushing reps with no control.', 'Knees caving in.'], ['Təkrarları nəzarətsiz tələsik etmək.', 'Dizlərin içəri düşməsi.']),
+  Leg_Press: m(
+    ['Lowering so deep that the lower back lifts off the pad.', 'Locking the knees hard at the top.'],
+    ['Bel oturacaqdan qalxacaq qədər dərin endirmək.', 'Yuxarıda dizləri sərt kilidləmək.'],
+  ),
+  Split_Squat_with_Dumbbells: m(['Stance too short, front heel lifts.', 'Pushing off the back leg.'], ['Addım çox qısa, ön daban qalxır.', 'Arxa ayaqla itələmək.']),
+  Split_Squats: m(['Stance too short.', 'Leaning far forward.'], ['Addım çox qısa.', 'Çox irəli əyilmək.']),
+  Romanian_Deadlift: m(
+    ['Rounding the back to reach lower.', 'Squatting the weight down instead of pushing the hips back.', 'Bar drifting away from the legs.'],
+    ['Daha aşağı enmək üçün beli yumrulamaq.', 'Kalçanı arxaya itmək əvəzinə squat kimi oturmaq.', 'Ştanqın ayaqlardan uzaqlaşması.'],
+  ),
+  'Stiff-Legged_Dumbbell_Deadlift': m(['Rounding the back.', 'Locking the knees completely.'], ['Beli yumrulamaq.', 'Dizləri tam kilidləmək.']),
+  Single_Leg_Glute_Bridge: m(['Arching the lower back instead of using glutes.', 'Hips rotating to one side.'], ['Sağrı əvəzinə beli əymək.', 'Kalçanın bir tərəfə dönməsi.']),
+  Barbell_Hip_Thrust: m(['Over-arching the lower back at the top.', 'Feet too far, hamstrings take over.'], ['Yuxarıda beli həddindən çox əymək.', 'Ayaqlar çox uzaqda, işi bud arxası görür.']),
+  Dumbbell_Lunges: m(['Front knee caving in.', 'Steps too short.'], ['Ön dizin içəri düşməsi.', 'Addımların çox qısa olması.']),
+  Bodyweight_Walking_Lunge: m(['Torso leaning forward.', 'Back knee slamming the floor.'], ['Gövdənin irəli əyilməsi.', 'Arxa dizin yerə dəyməsi.']),
+  Leg_Extensions: m(['Swinging the weight up.', 'Hips lifting off the seat.'], ['Çəkini yelləyib qaldırmaq.', 'Kalçanın oturacaqdan qalxması.']),
+  Lying_Leg_Curls: m(['Hips lifting off the pad.', 'Dropping the weight fast.'], ['Kalçanın yastıqdan qalxması.', 'Çəkini sürətlə buraxmaq.']),
+  Standing_Calf_Raises: m(['Bouncing with no pause or stretch.', 'Half reps.'], ['Dayanmadan, dartılmadan sıçramaq.', 'Yarım təkrarlar.']),
+  Calf_Raise_On_A_Dumbbell: m(['Bouncing quickly.', 'Too small a range of motion.'], ['Tez-tez sıçramaq.', 'Çox kiçik hərəkət amplitudası.']),
+  'Barbell_Bench_Press_-_Medium_Grip': m(
+    ['Elbows flared 90° out (shoulder stress).', 'Bouncing the bar off the chest.', 'Butt lifting off the bench.'],
+    ['Dirsəkləri 90° yana açmaq (çiyinə yük).', 'Ştanqı sinədən sıçratmaq.', 'Sağrının skamyadan qalxması.'],
+  ),
+  Dumbbell_Bench_Press: m(['Elbows flared to 90°.', 'Lowering only halfway.'], ['Dirsəkləri 90° yana açmaq.', 'Yalnız yarıya qədər endirmək.']),
+  Pushups: m(['Hips sagging.', 'Elbows flared wide; half reps.'], ['Kalçanın aşağı düşməsi.', 'Dirsəkləri geniş açmaq; yarım təkrarlar.']),
+  'Decline_Push-Up': m(['Hips piking up.', 'Head dropping toward the floor.'], ['Kalçanın yuxarı qalxması.', 'Başın yerə sallanması.']),
+  Incline_Dumbbell_Press: m(['Bench too steep (becomes a shoulder press).', 'Short range of motion.'], ['Skamya çox dik (çiyin presinə çevrilir).', 'Qısa hərəkət amplitudası.']),
+  Standing_Military_Press: m(['Leaning back excessively.', 'Pressing forward instead of straight up.'], ['Həddindən çox arxaya əyilmək.', 'Düz yuxarı yox, irəli itələmək.']),
+  Seated_Dumbbell_Press: m(['Arching the back off the pad.', 'Dumbbells drifting forward.'], ['Beli söykənəcəkdən əymək.', 'Hantellərin irəli getməsi.']),
+  Cable_Crossover: m(['Bending the elbows into a press.', 'Too heavy, torso swings.'], ['Dirsəkləri bükərək presə çevirmək.', 'Çəki ağır, gövdə yellənir.']),
+  Dumbbell_Flyes: m(['Going too deep, shoulder pain.', 'Straight arms (elbow stress).'], ['Çox dərin enmək, çiyin ağrısı.', 'Qolları tam düz saxlamaq (dirsəyə yük).']),
+  'Wide-Grip_Lat_Pulldown': m(['Leaning far back and rowing.', 'Pulling behind the neck.'], ['Çox arxaya əyilib çəkmək.', 'Boynun arxasına çəkmək.']),
+  Pullups: m(['Kipping/swinging.', 'Half reps without a dead hang.'], ['Yellənib qalxmaq.', 'Tam asılmadan yarım təkrarlar.']),
+  Seated_Cable_Rows: m(['Rocking the torso to move the weight.', 'Shrugging the shoulders up.'], ['Çəkini gövdəni yelləyərək hərəkət etdirmək.', 'Çiyinləri yuxarı çəkmək.']),
+  'One-Arm_Dumbbell_Row': m(['Twisting the torso.', 'Pulling to the chest instead of the hip.'], ['Gövdəni burmaq.', 'Kalçaya yox, sinəyə çəkmək.']),
+  Inverted_Row: m(['Hips sagging.', 'Not touching the bar/edge.'], ['Kalçanın aşağı düşməsi.', 'Kənara/turnikə toxunmamaq.']),
+  Side_Lateral_Raise: m(['Swinging heavy dumbbells.', 'Raising above shoulder height with shrugging.'], ['Ağır hantelləri yelləmək.', 'Çiyni çəkərək çiyindən yuxarı qaldırmaq.']),
+  Face_Pull: m(['Too heavy, leaning back.', 'Elbows dropping low.'], ['Çox ağır, arxaya əyilmək.', 'Dirsəklərin aşağı düşməsi.']),
+  Reverse_Flyes: m(['Squeezing shoulder blades (turns into a row).', 'Swinging.'], ['Kürək sümüklərini sıxmaq (çəkişə çevrilir).', 'Yellənmək.']),
+  Dumbbell_Bicep_Curl: m(['Swinging the torso.', 'Elbows moving forward.'], ['Gövdəni yelləmək.', 'Dirsəklərin irəli getməsi.']),
+  Hammer_Curls: m(['Swinging.', 'Partial reps.'], ['Yellənmək.', 'Natamam təkrarlar.']),
+  'Chin-Up': m(['Swinging.', 'Not going all the way down.'], ['Yellənmək.', 'Tam aşağı enməmək.']),
+  Triceps_Pushdown: m(['Elbows drifting forward.', 'Leaning over the weight.'], ['Dirsəklərin irəli getməsi.', 'Çəkinin üstünə əyilmək.']),
+  'Dumbbell_One-Arm_Triceps_Extension': m(['Elbow flaring out.', 'Too heavy, no stretch.'], ['Dirsəyin yana açılması.', 'Çox ağır, dartılma yoxdur.']),
+  Bench_Dips: m(['Going too deep (shoulder strain).', 'Shoulders shrugging up.'], ['Çox dərin enmək (çiyinə yük).', 'Çiyinlərin yuxarı qalxması.']),
+  Triceps_Overhead_Extension_with_Rope: m(['Elbows flaring.', 'Arching the lower back.'], ['Dirsəklərin açılması.', 'Belin əyilməsi.']),
+  Hanging_Leg_Raise: m(['Swinging for momentum.', 'Only lifting legs, not curling the pelvis.'], ['Təcil üçün yellənmək.', 'Çanağı bükmədən yalnız ayaqları qaldırmaq.']),
+  Crunches: m(['Pulling on the neck.', 'Sitting all the way up (hip flexors take over).'], ['Boynu dartmaq.', 'Tam oturmaq (işi kalça əzələləri görür).']),
+  Plank: m(['Hips sagging or piking.', 'Holding your breath.'], ['Kalçanın aşağı düşməsi və ya qalxması.', 'Nəfəsi saxlamaq.']),
+};
+
+/** Opens real-person form videos for the exercise (YouTube search, no licensing issues). */
+export function videoSearchUrl(id: string): string {
+  const q = `${EXERCISES[id]?.en ?? id.replace(/_/g, ' ')} proper form`;
+  return `https://www.youtube.com/results?search_query=${encodeURIComponent(q)}`;
 }
 
 /** Double progression: all sets at the top of the range → add load; else add reps. */
