@@ -1,0 +1,46 @@
+{
+  "expo": {
+    "name": "TrackYSF",
+    "slug": "TrackYSF",
+    "scheme": "trackysf",
+    "version": "1.0.0",
+    "orientation": "portrait",
+    "icon": "./assets/icon.png",
+    "userInterfaceStyle": "dark",
+    "backgroundColor": "#0D0E10",
+    "ios": {
+      "supportsTablet": false,
+      "bundleIdentifier": "com.elcann7.trackysf",
+      "infoPlist": {
+        "ITSAppUsesNonExemptEncryption": false
+      }
+    },
+    "android": {
+      "package": "com.elcann7.trackysf",
+      "adaptiveIcon": {
+        "backgroundColor": "#0D0E10",
+        "foregroundImage": "./assets/android-icon-foreground.png",
+        "backgroundImage": "./assets/android-icon-background.png",
+        "monochromeImage": "./assets/android-icon-monochrome.png"
+      },
+      "predictiveBackGestureEnabled": false
+    },
+    "web": {
+      "favicon": "./assets/favicon.png"
+    },
+    "plugins": [
+      "expo-router",
+      "expo-sqlite",
+      "expo-secure-store",
+      "expo-localization",
+      "expo-image",
+      [
+        "expo-image-picker",
+        {
+          "photosPermission": "TrackYSF reads meal photos to estimate calories.",
+          "cameraPermission": "TrackYSF uses the camera to photograph your meals."
+        }
+      ]
+    ]
+  }
+}
