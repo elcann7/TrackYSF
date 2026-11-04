@@ -2,10 +2,13 @@
 
 Personal iOS calorie & macro tracker. Snap a meal, optionally add what's inside and how many grams, and Gemini estimates calories, protein, carbs and fat per component. Adjust grams, add to your diary in one tap.
 
-## Features (v1)
-- **Onboarding**: animated ruler sliders for age / height / weight, activity, goal → daily kcal + macro targets (Mifflin-St Jeor).
+## Features
+- **Onboarding**: animated ruler sliders for age / height / weight, activity, goal, **target weight and timeframe**. The app checks whether the pace is realistic (fat loss ≤0.75 % bodyweight/week, lean gain ≤0.5 kg/week), warns when it isn't and offers a realistic timeframe. Daily kcal + macros follow from Mifflin-St Jeor and the chosen pace (with a safe calorie floor).
 - **Today**: 7-day strip, calorie ring, macro bars, meals (breakfast / lunch / dinner / snack).
-- **Add food**: camera, photo library or plain text. Optional food name + ingredients/grams make the estimate more precise. Result is editable per item (grams rescale macros instantly).
+- **AI scan**: camera, photo library or plain text. Optional food name + ingredients/grams make the estimate more precise. Result is editable per item (grams rescale macros instantly).
+- **Food search**: ~120 built-in common foods (incl. Azerbaijani dishes, AZ/EN names, diacritic-insensitive search) + online search in [Open Food Facts](https://world.openfoodfacts.org) for branded products. Pick grams or servings.
+- **Quick add**: enter calories (and optional macros) directly.
+- **My foods**: create your own foods/recipes (values per 100 g/ml or per serving).
 - **Recent foods**: one-tap re-add.
 - **Progress**: weight log (0.1 kg ruler), smoothed chart, weekly trend with guidance, 7-day calorie bars and averages.
 - **Settings**: AZ / EN interface, targets, profile, Gemini API key (stored in the iOS Keychain), erase data.

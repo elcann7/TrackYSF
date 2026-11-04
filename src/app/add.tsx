@@ -18,8 +18,9 @@ import Animated, {
   withTiming,
 } from 'react-native-reanimated';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import { FoodPicker } from '@/components/FoodPicker';
 import { Button, Card, Icon, PressableScale, Segmented, haptic } from '@/components/ui';
-import { MEALS, addEntry, recentFoods, type Entry, type FoodItem, type MealType } from '@/lib/db';
+import { MEALS, addEntry, type Entry, type FoodItem, type MealType } from '@/lib/db';
 import { mealForNow, todayKey } from '@/lib/dates';
 import { AnalyzeError, analyzeMeal, scaleItem, type Analysis } from '@/lib/gemini';
 import type { TKey } from '@/lib/i18n';
@@ -60,12 +61,6 @@ export default function AddFood() {
   const [base, setBase] = useState<FoodItem[]>([]); // AI items, source for scaling
   const [items, setItems] = useState<FoodItem[]>([]);
   const [name, setName] = useState('');
-  const [recent, setRecent] = useState<Entry[]>([]);
-
-  useEffect(() => {
-    recentFoods(db).then(setRecent);
-  }, [db]);
-
   const totals = useMemo(() => sumMacros(items), [items]);
 
   const pick = async (source: 'camera' | 'library') => {
@@ -147,7 +142,7 @@ export default function AddFood() {
     await addEntry(db, { date, meal, name: e.name, kcal: e.kcal, protein: e.protein, carbs: e.carbs, fat: e.fat, items: e.items, thumb: e.thumb });
     haptic.success();
     bump();
-    router.back();
+    router.dismissAll();
   };
 
   const mealOptions = MEALS.map((m) => ({ value: m, label: t(m) }));
@@ -173,42 +168,18 @@ export default function AddFood() {
 
         {/* ---------- PICK ---------- */}
         {mode === 'pick' && (
-          <Animated.View entering={FadeIn.duration(250)} exiting={FadeOut.duration(150)} style={{ gap: space.lg }}>
-            <View style={styles.sourceRow}>
-              <SourceTile icon="camera.fill" label={t('camera')} primary onPress={() => pick('camera')} />
-              <SourceTile icon="photo.on.rectangle" label={t('library')} onPress={() => pick('library')} />
-              <SourceTile icon="text.cursor" label={t('describe')} onPress={() => setMode('text')} />
-            </View>
-
-            <Text style={styles.section}>{t('recent')}</Text>
-            {recent.length === 0 ? (
-              <Text style={styles.hint}>{t('noRecent')}</Text>
-            ) : (
-              <Card style={{ padding: 0 }}>
-                {recent.map((e, i) => (
-                  <Animated.View key={e.id} entering={FadeInDown.delay(i * 40).duration(350)}>
-                    <PressableScale onPress={() => quickAdd(e)} scaleTo={0.98} style={[styles.recentRow, i > 0 && styles.rowBorder]}>
-                      {e.thumb ? (
-                        <Image source={{ uri: `data:image/jpeg;base64,${e.thumb}` }} style={styles.recentThumb} />
-                      ) : (
-                        <View style={[styles.recentThumb, { alignItems: 'center', justifyContent: 'center' }]}>
-                          <Icon name="fork.knife" size={14} color={colors.textDim} />
-                        </View>
-                      )}
-                      <View style={{ flex: 1 }}>
-                        <Text style={styles.recentName} numberOfLines={1}>
-                          {e.name}
-                        </Text>
-                        <Text style={styles.recentSub}>
-                          {Math.round(e.kcal)} {t('kcal')} · P {Math.round(e.protein)} · C {Math.round(e.carbs)} · F {Math.round(e.fat)}
-                        </Text>
-                      </View>
-                      <Icon name="plus.circle.fill" size={24} color={colors.accent} />
-                    </PressableScale>
-                  </Animated.View>
-                ))}
-              </Card>
-            )}
+          <Animated.View entering={FadeIn.duration(250)} exiting={FadeOut.duration(150)}>
+            <FoodPicker
+              date={date}
+              meal={meal}
+              onCamera={() => pick('camera')}
+              onLibrary={() => pick('library')}
+              onDescribe={(prefill) => {
+                if (prefill) setDetails(prefill);
+                setMode('text');
+              }}
+              onRecent={quickAdd}
+            />
           </Animated.View>
         )}
 
@@ -327,15 +298,6 @@ export default function AddFood() {
   );
 }
 
-function SourceTile({ icon, label, onPress, primary }: { icon: 'camera.fill' | 'photo.on.rectangle' | 'text.cursor'; label: string; onPress: () => void; primary?: boolean }) {
-  return (
-    <PressableScale onPress={onPress} style={[styles.tile, primary && { backgroundColor: colors.accent }]} scaleTo={0.94}>
-      <Icon name={icon} size={26} color={primary ? colors.onAccent : colors.text} />
-      <Text style={[styles.tileLabel, primary && { color: colors.onAccent }]}>{label}</Text>
-    </PressableScale>
-  );
-}
-
 function MacroChip({ label, value, color, unit }: { label: string; value: number; color: string; unit: string }) {
   return (
     <View style={styles.chip}>
@@ -411,26 +373,9 @@ const styles = StyleSheet.create({
   },
   headerTitle: { color: colors.text, fontSize: 17, fontWeight: '700' },
   iconBtn: { width: 36, height: 36, borderRadius: 18, backgroundColor: colors.surfaceHigh, alignItems: 'center', justifyContent: 'center' },
-  sourceRow: { flexDirection: 'row', gap: space.md },
-  tile: {
-    flex: 1,
-    height: 112,
-    borderRadius: radius.lg,
-    backgroundColor: colors.surface,
-    alignItems: 'center',
-    justifyContent: 'center',
-    gap: 10,
-    borderWidth: StyleSheet.hairlineWidth,
-    borderColor: colors.hairline,
-  },
-  tileLabel: { color: colors.text, fontSize: 14, fontWeight: '600' },
   section: { color: colors.textFaint, fontSize: 12, fontWeight: '700', letterSpacing: 1, textTransform: 'uppercase' },
   hint: { color: colors.textDim, fontSize: 14, lineHeight: 20 },
-  recentRow: { flexDirection: 'row', alignItems: 'center', gap: space.md, paddingHorizontal: space.lg, paddingVertical: space.md },
   rowBorder: { borderTopWidth: StyleSheet.hairlineWidth, borderTopColor: colors.hairline },
-  recentThumb: { width: 40, height: 40, borderRadius: 10, backgroundColor: colors.surfaceHigh },
-  recentName: { color: colors.text, fontSize: 15, fontWeight: '600' },
-  recentSub: { color: colors.textDim, fontSize: 12, marginTop: 2, fontVariant: ['tabular-nums'] },
   photoWrap: { borderRadius: radius.xl, overflow: 'hidden', backgroundColor: colors.surface },
   photo: { width: '100%', aspectRatio: 1 },
   photoHint: {

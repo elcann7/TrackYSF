@@ -62,10 +62,13 @@ export default function Today() {
       >
         {/* Header */}
         <View style={styles.header}>
-          <View>
+          <View style={{ flex: 1 }}>
             <Text style={styles.kicker}>{`${d.getDate()} ${MONTHS[lang][d.getMonth()]}`.toUpperCase()}</Text>
             <Text style={styles.title}>{heading}</Text>
           </View>
+          <PressableScale onPress={() => openAdd()} style={styles.addBtn} scaleTo={0.9}>
+            <Icon name="plus" size={22} color={colors.onAccent} weight="bold" />
+          </PressableScale>
         </View>
 
         {/* Week strip */}
@@ -138,15 +141,6 @@ export default function Today() {
           })}
         </View>
       </ScrollView>
-
-      {/* Floating add */}
-      <PressableScale
-        onPress={() => openAdd()}
-        style={[styles.fab, { bottom: insets.bottom + 72 }]}
-        scaleTo={0.9}
-      >
-        <Icon name="camera.fill" size={22} color={colors.onAccent} />
-      </PressableScale>
     </View>
   );
 }
@@ -195,7 +189,16 @@ function EntryRow({ e }: { e: Entry }) {
 }
 
 const styles = StyleSheet.create({
-  header: { paddingHorizontal: space.xl, marginBottom: space.lg },
+  header: { flexDirection: 'row', alignItems: 'flex-end', paddingHorizontal: space.xl, marginBottom: space.lg },
+  addBtn: {
+    width: 52,
+    height: 52,
+    borderRadius: 26,
+    backgroundColor: colors.accent,
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginBottom: 2,
+  },
   kicker: { color: colors.textFaint, fontSize: 12, fontWeight: '700', letterSpacing: 1.2 },
   title: { ...type.title, fontSize: 34, color: colors.text, marginTop: 2 },
   week: { flexDirection: 'row', paddingHorizontal: space.lg, gap: 6, marginBottom: space.lg },
@@ -245,18 +248,4 @@ const styles = StyleSheet.create({
   entryName: { color: colors.text, fontSize: 15, fontWeight: '600' },
   entryMacros: { fontSize: 12, fontWeight: '600', marginTop: 3, fontVariant: ['tabular-nums'] },
   entryKcal: { color: colors.text, fontSize: 16, fontWeight: '700', fontVariant: ['tabular-nums'] },
-  fab: {
-    position: 'absolute',
-    right: space.xl,
-    width: 60,
-    height: 60,
-    borderRadius: 30,
-    backgroundColor: colors.accent,
-    alignItems: 'center',
-    justifyContent: 'center',
-    shadowColor: '#000',
-    shadowOpacity: 0.35,
-    shadowRadius: 12,
-    shadowOffset: { width: 0, height: 6 },
-  },
 });

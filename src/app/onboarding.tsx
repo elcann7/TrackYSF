@@ -21,13 +21,23 @@ import { Odometer, RulerPicker } from '@/components/Ruler';
 import { Button, Icon, PressableScale, Segmented, haptic } from '@/components/ui';
 import { setWeight } from '@/lib/db';
 import { todayKey } from '@/lib/dates';
-import type { TKey } from '@/lib/i18n';
-import { computeTargets, type Activity, type Goal, type Profile, type Sex } from '@/lib/nutrition';
+import { MONTHS, fmt, type TKey } from '@/lib/i18n';
+import { assessPace, computeTargets, type Activity, type Goal, type Pace, type Profile, type Sex } from '@/lib/nutrition';
 import { useApp } from '@/lib/store';
 import { colors, radius, space, type } from '@/theme';
 
-const STEPS = ['welcome', 'sex', 'age', 'height', 'weight', 'activity', 'goal', 'plan'] as const;
-type Step = (typeof STEPS)[number];
+const ALL_STEPS = ['welcome', 'sex', 'age', 'height', 'weight', 'activity', 'goal', 'target', 'pace', 'plan'] as const;
+type Step = (typeof ALL_STEPS)[number];
+
+/** Sensible starting target + timeframe when a goal is picked. */
+function withGoalDefaults(p: Profile, goal: Goal): Profile {
+  if (goal === 'maintain') return { ...p, goal, targetKg: undefined, months: undefined };
+  const delta = goal === 'lose' ? -Math.max(2, Math.round(p.weightKg * 0.08)) : Math.max(3, Math.round(p.weightKg * 0.1));
+  const targetKg = Math.max(35, Math.round((p.weightKg + delta) * 2) / 2);
+  const draft: Profile = { ...p, goal, targetKg, months: 6 };
+  const pace = assessPace(draft);
+  return { ...draft, months: pace ? pace.suggestedMonths : 6 };
+}
 
 export default function Onboarding() {
   const insets = useSafeAreaInsets();
@@ -40,16 +50,25 @@ export default function Onboarding() {
   const [p, setP] = useState<Profile>(
     existing ?? { sex: 'male', age: 20, heightCm: 172, weightKg: 65, activity: 'moderate', goal: 'gain' },
   );
-  const step: Step = STEPS[i];
+  const STEPS = useMemo<Step[]>(
+    () => ALL_STEPS.filter((s) => p.goal !== 'maintain' || (s !== 'target' && s !== 'pace')),
+    [p.goal],
+  );
+  const step: Step = STEPS[Math.min(i, STEPS.length - 1)];
   const targets = useMemo(() => computeTargets(p), [p]);
+  const pace = useMemo(() => assessPace(p), [p]);
 
   const progress = useSharedValue(0);
   useEffect(() => {
     progress.value = withSpring(i / (STEPS.length - 1), { damping: 20, stiffness: 140 });
-  }, [i, progress]);
+  }, [i, progress, STEPS.length]);
   const barStyle = useAnimatedStyle(() => ({ width: `${progress.value * 100}%` }));
 
   const next = () => {
+    // target missing, or no longer on the right side of the (possibly edited) current weight → reset it
+    const badTarget =
+      p.targetKg == null || (p.goal === 'lose' ? p.targetKg >= p.weightKg : p.targetKg <= p.weightKg);
+    if (step === 'goal' && p.goal !== 'maintain' && badTarget) setP(withGoalDefaults(p, p.goal));
     setDir(1);
     setI((x) => Math.min(STEPS.length - 1, x + 1));
   };
@@ -204,11 +223,50 @@ export default function Onboarding() {
                     title={t(`goal_${g}` as TKey)}
                     desc={t(`goal_${g}_d` as TKey)}
                     selected={p.goal === g}
-                    onPress={() => setP({ ...p, goal: g })}
+                    onPress={() => setP(p.goal === g && p.targetKg != null ? p : withGoalDefaults(p, g))}
                   />
                 </Animated.View>
               ))}
             </View>
+          </Question>
+        )}
+
+        {step === 'target' && p.goal !== 'maintain' && (
+          <Question title={t('targetQ')} sub={fmt(t('nowWeight'), { n: p.weightKg.toFixed(1) })} fullBleed>
+            <RulerPicker
+              key={p.goal}
+              min={p.goal === 'lose' ? Math.max(30, Math.floor(p.weightKg - 60)) : Math.ceil(p.weightKg) + 1}
+              max={p.goal === 'lose' ? Math.floor(p.weightKg) - 1 : Math.ceil(p.weightKg) + 60}
+              step={0.5}
+              decimals={1}
+              majorEvery={10}
+              value={p.targetKg ?? p.weightKg}
+              unit={t('kg')}
+              onChange={(v) => setP((x) => ({ ...x, targetKg: v }))}
+            />
+          </Question>
+        )}
+
+        {step === 'pace' && pace && (
+          <Question title={t('paceQ')} sub={t('paceSub')}>
+            <View style={{ marginHorizontal: -space.xl }}>
+              <RulerPicker
+                min={1}
+                max={36}
+                majorEvery={6}
+                value={p.months ?? 6}
+                unit={t('months')}
+                onChange={(v) => setP((x) => ({ ...x, months: v }))}
+              />
+            </View>
+            <PaceCard
+              pace={pace}
+              kcal={targets.kcal}
+              onRealistic={() => {
+                haptic.tap();
+                setP((x) => ({ ...x, months: pace.suggestedMonths }));
+              }}
+            />
           </Question>
         )}
 
@@ -294,6 +352,43 @@ function ChoiceCard({
         )}
       </Animated.View>
     </PressableScale>
+  );
+}
+
+function PaceCard({ pace, kcal, onRealistic }: { pace: Pace; kcal: number; onRealistic: () => void }) {
+  const { t, lang } = useApp();
+  const color = pace.verdict === 'realistic' ? colors.success : pace.verdict === 'aggressive' ? colors.carbs : colors.danger;
+  const icon: SFSymbol =
+    pace.verdict === 'realistic' ? 'checkmark.circle.fill' : pace.verdict === 'aggressive' ? 'exclamationmark.circle.fill' : 'xmark.octagon.fill';
+  const w = pace.weeklyKg;
+  return (
+    <Animated.View key={pace.verdict} entering={FadeIn.duration(250)} style={[styles.paceCard, { borderColor: color }]}>
+      <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
+        <Icon name={icon} size={20} color={color} />
+        <Text style={[styles.paceVerdict, { color }]}>{t(`verdict_${pace.verdict}` as TKey)}</Text>
+      </View>
+      <Text style={styles.paceDesc}>{t(`verdict_${pace.verdict}_d` as TKey)}</Text>
+      <View style={styles.paceStats}>
+        <PaceStat label={t('weeklyChange')} value={`${w >= 0 ? '+' : '−'}${Math.abs(w).toFixed(2)} ${t('kg')}`} />
+        <PaceStat label={t('dailyCal')} value={`${kcal}`} />
+        <PaceStat label={t('goalDate')} value={`${MONTHS[lang][pace.eta.getMonth()].slice(0, 3)} ${pace.eta.getFullYear()}`} />
+      </View>
+      {pace.verdict !== 'realistic' && (
+        <PressableScale onPress={onRealistic} style={styles.paceFix} hapticOnPress={false}>
+          <Icon name="wand.and.stars" size={16} color={colors.onAccent} />
+          <Text style={styles.paceFixText}>{fmt(t('useRealistic'), { n: pace.suggestedMonths })}</Text>
+        </PressableScale>
+      )}
+    </Animated.View>
+  );
+}
+
+function PaceStat({ label, value }: { label: string; value: string }) {
+  return (
+    <View style={{ flex: 1 }}>
+      <Text style={styles.paceStatLabel}>{label}</Text>
+      <Text style={styles.paceStatValue}>{value}</Text>
+    </View>
   );
 }
 
@@ -395,4 +490,27 @@ const styles = StyleSheet.create({
   },
   planMacroLabel: { color: colors.textDim, fontSize: 13, fontWeight: '600' },
   footer: { paddingHorizontal: space.xl, paddingTop: space.md },
+  paceCard: {
+    marginTop: space.xl,
+    padding: space.lg,
+    borderRadius: radius.lg,
+    backgroundColor: colors.surface,
+    borderWidth: 1.5,
+    gap: space.md,
+  },
+  paceVerdict: { fontSize: 17, fontWeight: '700' },
+  paceDesc: { color: colors.textDim, fontSize: 14, lineHeight: 20 },
+  paceStats: { flexDirection: 'row', gap: space.md },
+  paceStatLabel: { color: colors.textFaint, fontSize: 11, fontWeight: '700', textTransform: 'uppercase', letterSpacing: 0.6 },
+  paceStatValue: { color: colors.text, fontSize: 16, fontWeight: '700', marginTop: 3, fontVariant: ['tabular-nums'] },
+  paceFix: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 8,
+    height: 44,
+    borderRadius: radius.md,
+    backgroundColor: colors.accent,
+  },
+  paceFixText: { color: colors.onAccent, fontSize: 15, fontWeight: '700' },
 });

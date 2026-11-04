@@ -126,13 +126,23 @@ export function RulerPicker({
 }) {
   const { width } = useWindowDimensions();
   const count = Math.round((max - min) / step) + 1;
-  const initialIndex = Math.round((value - min) / step);
+  const initialIndex = Math.min(count - 1, Math.max(0, Math.round((value - min) / step)));
   const scrollX = useSharedValue(initialIndex * TICK_W);
   const lastIndex = useSharedValue(initialIndex);
   const [display, setDisplay] = useState(value);
   const pad = width / 2 - TICK_W / 2;
   const onChangeRef = useRef(onChange);
   onChangeRef.current = onChange;
+  const scrollRef = useRef<Animated.ScrollView>(null);
+  const displayRef = useRef(value);
+  displayRef.current = display;
+
+  // External value change (e.g. "use realistic pace" button) → glide the ruler there.
+  useEffect(() => {
+    if (Math.abs(value - displayRef.current) < step / 2) return;
+    const idx = Math.min(count - 1, Math.max(0, Math.round((value - min) / step)));
+    scrollRef.current?.scrollTo({ x: idx * TICK_W, animated: true });
+  }, [value, min, step, count]);
 
   const emit = useCallback(
     (idx: number) => {
@@ -158,9 +168,10 @@ export function RulerPicker({
   const ticks = useMemo(
     () =>
       Array.from({ length: count }, (_, i) => {
-        const v = min + i * step;
-        const unitsFromMin = Math.round(i * step * 1000) / 1000;
-        const major = Math.abs(unitsFromMin / (majorEvery * step) - Math.round(unitsFromMin / (majorEvery * step))) < 1e-6;
+        const v = Math.round((min + i * step) * 1000) / 1000;
+        // major ticks on round values (e.g. every 5 kg, every 10 cm, every 6 months)
+        const q = v / (majorEvery * step);
+        const major = Math.abs(q - Math.round(q)) < 1e-6;
         return { i, major, label: major ? String(Math.round(v)) : null };
       }),
     [count, min, step, majorEvery],
@@ -175,6 +186,7 @@ export function RulerPicker({
 
       <View style={styles.rulerWrap}>
         <Animated.ScrollView
+          ref={scrollRef}
           horizontal
           showsHorizontalScrollIndicator={false}
           onScroll={handler}

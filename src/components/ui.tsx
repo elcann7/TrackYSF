@@ -30,12 +30,16 @@ type PressableScaleProps = Omit<PressableProps, 'style'> & {
   children?: ReactNode;
 };
 
+const AnimatedPressable = Animated.createAnimatedComponent(Pressable);
+
+// The style (flex, size, position) goes on the pressable itself, so layout behaves like a plain View.
 export function PressableScale({ style, scaleTo = 0.96, hapticOnPress = true, onPress, children, ...rest }: PressableScaleProps) {
   const s = useSharedValue(1);
   const aStyle = useAnimatedStyle(() => ({ transform: [{ scale: s.value }] }));
   return (
-    <Pressable
+    <AnimatedPressable
       {...rest}
+      style={[style, aStyle]}
       onPressIn={(e) => {
         s.value = withSpring(scaleTo, { damping: 20, stiffness: 400 });
         rest.onPressIn?.(e);
@@ -49,8 +53,8 @@ export function PressableScale({ style, scaleTo = 0.96, hapticOnPress = true, on
         onPress?.(e);
       }}
     >
-      <Animated.View style={[style, aStyle]}>{children}</Animated.View>
-    </Pressable>
+      {children}
+    </AnimatedPressable>
   );
 }
 

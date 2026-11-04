@@ -24,13 +24,35 @@ export interface WeightPoint {
   kg: number;
 }
 
-const SCHEMA_VERSION = 1;
+const SCHEMA_VERSION = 2;
 
 export async function migrate(db: SQLiteDatabase): Promise<void> {
   const row = await db.getFirstAsync<{ user_version: number }>('PRAGMA user_version');
   const current = row?.user_version ?? 0;
   if (current >= SCHEMA_VERSION) return;
 
+  if (current < 1) await migrateV1(db);
+  if (current < 2) {
+    await db.execAsync(`
+      CREATE TABLE IF NOT EXISTS my_foods (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        name TEXT NOT NULL,
+        brand TEXT,
+        unit TEXT NOT NULL DEFAULT 'g',
+        kcal REAL NOT NULL,
+        protein REAL NOT NULL,
+        carbs REAL NOT NULL,
+        fat REAL NOT NULL,
+        serving_label TEXT,
+        serving_g REAL,
+        created_at INTEGER NOT NULL
+      );
+    `);
+  }
+  await db.execAsync(`PRAGMA user_version = ${SCHEMA_VERSION}`);
+}
+
+async function migrateV1(db: SQLiteDatabase): Promise<void> {
   await db.execAsync(`
     PRAGMA journal_mode = WAL;
     CREATE TABLE IF NOT EXISTS kv (key TEXT PRIMARY KEY NOT NULL, value TEXT NOT NULL);
@@ -50,7 +72,46 @@ export async function migrate(db: SQLiteDatabase): Promise<void> {
     CREATE INDEX IF NOT EXISTS idx_entries_date ON entries(date);
     CREATE TABLE IF NOT EXISTS weights (date TEXT PRIMARY KEY NOT NULL, kg REAL NOT NULL);
   `);
-  await db.execAsync(`PRAGMA user_version = ${SCHEMA_VERSION}`);
+}
+
+// ---------- my foods (user-created, values per 100 g / ml) ----------
+export interface MyFoodRow {
+  id: number;
+  name: string;
+  brand: string | null;
+  unit: 'g' | 'ml';
+  kcal: number;
+  protein: number;
+  carbs: number;
+  fat: number;
+  serving_label: string | null;
+  serving_g: number | null;
+}
+
+export async function allMyFoods(db: SQLiteDatabase): Promise<MyFoodRow[]> {
+  return db.getAllAsync<MyFoodRow>('SELECT * FROM my_foods ORDER BY created_at DESC');
+}
+
+export async function addMyFood(db: SQLiteDatabase, f: Omit<MyFoodRow, 'id'>): Promise<number> {
+  const r = await db.runAsync(
+    `INSERT INTO my_foods (name, brand, unit, kcal, protein, carbs, fat, serving_label, serving_g, created_at)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+    f.name,
+    f.brand,
+    f.unit,
+    f.kcal,
+    f.protein,
+    f.carbs,
+    f.fat,
+    f.serving_label,
+    f.serving_g,
+    Date.now(),
+  );
+  return r.lastInsertRowId;
+}
+
+export async function deleteMyFood(db: SQLiteDatabase, id: number): Promise<void> {
+  await db.runAsync('DELETE FROM my_foods WHERE id = ?', id);
 }
 
 // ---------- kv ----------
@@ -200,5 +261,5 @@ export async function deleteWeight(db: SQLiteDatabase, date: string): Promise<vo
 }
 
 export async function eraseAll(db: SQLiteDatabase): Promise<void> {
-  await db.execAsync('DELETE FROM entries; DELETE FROM weights; DELETE FROM kv;');
+  await db.execAsync('DELETE FROM entries; DELETE FROM weights; DELETE FROM kv; DELETE FROM my_foods;');
 }

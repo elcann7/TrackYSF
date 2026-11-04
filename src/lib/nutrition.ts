@@ -9,6 +9,59 @@ export interface Profile {
   weightKg: number;
   activity: Activity;
   goal: Goal;
+  /** Target weight for lose/gain goals. */
+  targetKg?: number;
+  /** Months to reach the target. */
+  months?: number;
+}
+
+export type PaceVerdict = 'realistic' | 'aggressive' | 'unrealistic';
+
+export interface Pace {
+  /** Planned change per week in kg (negative when losing). */
+  weeklyKg: number;
+  /** Daily calorie adjustment vs. maintenance. */
+  dailyDelta: number;
+  verdict: PaceVerdict;
+  /** Months needed at a comfortable, sustainable pace. */
+  suggestedMonths: number;
+  /** Date the target is reached with the chosen months. */
+  eta: Date;
+}
+
+const KCAL_PER_KG = 7700;
+const WEEKS_PER_MONTH = 4.345;
+
+/**
+ * Evidence-based pace limits:
+ * - fat loss: ≤0.75% bodyweight/week sustainable, ≤1% aggressive, more is unrealistic (muscle loss).
+ * - muscle gain: ≤0.5 kg/week for beginners, ≤0.75 aggressive (mostly fat), more is unrealistic.
+ */
+export function assessPace(p: Profile): Pace | null {
+  if (p.goal === 'maintain' || p.targetKg == null || !p.months) return null;
+  const diff = p.targetKg - p.weightKg;
+  const weeks = p.months * WEEKS_PER_MONTH;
+  const weeklyKg = diff / weeks;
+  const abs = Math.abs(weeklyKg);
+  let verdict: PaceVerdict;
+  let comfortable: number;
+  if (diff < 0) {
+    const pct = (abs / p.weightKg) * 100;
+    verdict = pct <= 0.75 ? 'realistic' : pct <= 1 ? 'aggressive' : 'unrealistic';
+    comfortable = p.weightKg * 0.006;
+  } else {
+    verdict = abs <= 0.5 ? 'realistic' : abs <= 0.75 ? 'aggressive' : 'unrealistic';
+    comfortable = 0.35;
+  }
+  const suggestedMonths = Math.max(1, Math.ceil(Math.abs(diff) / comfortable / WEEKS_PER_MONTH));
+  const eta = new Date();
+  eta.setDate(eta.getDate() + Math.round(weeks * 7));
+  return { weeklyKg, dailyDelta: (weeklyKg * KCAL_PER_KG) / 7, verdict, suggestedMonths, eta };
+}
+
+/** Lowest daily intake the app will ever suggest. */
+export function calorieFloor(p: Profile): number {
+  return Math.max(p.sex === 'male' ? 1500 : 1200, Math.round(bmr(p)));
 }
 
 export interface Targets {
@@ -34,7 +87,7 @@ export const ACTIVITY_FACTOR: Record<Activity, number> = {
 };
 
 const GOAL_DELTA: Record<Goal, number> = { lose: -450, maintain: 0, gain: 400 };
-const PROTEIN_PER_KG: Record<Goal, number> = { lose: 2.2, maintain: 1.8, gain: 2.2 };
+const PROTEIN_PER_KG: Record<Goal, number> = { lose: 2.0, maintain: 1.8, gain: 2.2 };
 
 /** Mifflin-St Jeor BMR. */
 export function bmr(p: Pick<Profile, 'sex' | 'age' | 'heightCm' | 'weightKg'>): number {
@@ -47,8 +100,13 @@ export function tdee(p: Profile): number {
 }
 
 export function computeTargets(p: Profile): Targets {
-  const kcal = roundTo(tdee(p) + GOAL_DELTA[p.goal], 10);
-  const protein = Math.round(p.weightKg * PROTEIN_PER_KG[p.goal]);
+  const pace = assessPace(p);
+  // Chosen pace drives the deficit/surplus, but never beyond ±1000 kcal or below a safe floor.
+  const delta = pace ? Math.max(-1000, Math.min(1000, pace.dailyDelta)) : GOAL_DELTA[p.goal];
+  const kcal = roundTo(Math.max(calorieFloor(p), tdee(p) + delta), 10);
+  // when cutting, base protein on goal weight so heavier people don't get absurd targets
+  const proteinBase = p.goal === 'lose' && p.targetKg != null ? Math.min(p.weightKg, p.targetKg) : p.weightKg;
+  const protein = Math.round(proteinBase * PROTEIN_PER_KG[p.goal]);
   const fat = Math.round((kcal * 0.25) / 9);
   const carbs = Math.max(0, Math.round((kcal - protein * 4 - fat * 9) / 4));
   return { kcal, protein, carbs, fat };

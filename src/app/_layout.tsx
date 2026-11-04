@@ -22,6 +22,27 @@ function RootStack() {
         <Stack.Screen name="(tabs)" />
         <Stack.Screen name="add" options={{ presentation: 'modal' }} />
         <Stack.Screen name="profile" options={{ presentation: 'fullScreenModal' }} />
+        <Stack.Screen name="create-food" options={{ presentation: 'modal' }} />
+        <Stack.Screen
+          name="food-amount"
+          options={{
+            presentation: 'formSheet',
+            sheetAllowedDetents: [0.85, 1],
+            sheetGrabberVisible: true,
+            sheetCornerRadius: 28,
+            contentStyle: { backgroundColor: colors.surface },
+          }}
+        />
+        <Stack.Screen
+          name="quick-add"
+          options={{
+            presentation: 'formSheet',
+            sheetAllowedDetents: [0.8, 1],
+            sheetGrabberVisible: true,
+            sheetCornerRadius: 28,
+            contentStyle: { backgroundColor: colors.surface },
+          }}
+        />
         <Stack.Screen
           name="entry/[id]"
           options={{

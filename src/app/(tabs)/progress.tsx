@@ -5,11 +5,11 @@ import { ScrollView, StyleSheet, Text, View, useWindowDimensions } from 'react-n
 import Animated, { FadeInDown, useAnimatedStyle, useSharedValue, withDelay, withTiming, Easing } from 'react-native-reanimated';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import Svg, { Circle, Defs, LinearGradient, Path, Stop } from 'react-native-svg';
-import { Button, Card } from '@/components/ui';
+import { Button, Card, Icon } from '@/components/ui';
 import { allWeights, dailyTotals, type WeightPoint } from '@/lib/db';
 import { addDays, fromKey, todayKey } from '@/lib/dates';
-import { WEEKDAYS, type TKey } from '@/lib/i18n';
-import { weeklyTrend, type Macros } from '@/lib/nutrition';
+import { MONTHS, WEEKDAYS, type TKey } from '@/lib/i18n';
+import { assessPace, weeklyTrend, type Macros } from '@/lib/nutrition';
 import { useApp } from '@/lib/store';
 import { colors, radius, space, type } from '@/theme';
 
@@ -35,11 +35,14 @@ export default function Progress() {
   const recent = weights.filter((w) => w.date >= addDays(todayKey(), -28));
   const trend = weeklyTrend(recent);
 
+  const pace = profile ? assessPace(profile) : null;
+  const planned = pace?.weeklyKg ?? 0;
   let tip: TKey = 'tipNeedData';
   if (trend !== null && profile) {
-    if (profile.goal === 'gain') tip = trend < 0.3 ? 'tipSlow' : trend > 0.6 ? 'tipFast' : 'tipGood';
-    else if (profile.goal === 'lose') tip = trend > -0.2 ? 'tipLoseSlow' : trend < -0.8 ? 'tipLoseFast' : 'tipGood';
-    else tip = Math.abs(trend) < 0.25 ? 'tipGood' : trend > 0 ? 'tipFast' : 'tipLoseSlow';
+    const ok = Math.abs(trend - planned) <= Math.max(0.15, Math.abs(planned) * 0.4);
+    if (ok) tip = 'tipGood';
+    else if (profile.goal === 'lose') tip = trend > planned ? 'tipLoseSlow' : 'tipLoseFast';
+    else tip = trend < planned ? 'tipSlow' : 'tipFast';
   }
 
   const logged = days.filter((d) => d.kcal > 0);
@@ -62,6 +65,17 @@ export default function Progress() {
             <Stat label={t('change')} value={`${change >= 0 ? '+' : ''}${change.toFixed(1)}`} unit={t('kg')} />
             <Stat label={t('trend')} value={trend === null ? '—' : `${trend >= 0 ? '+' : ''}${trend.toFixed(2)}`} unit={trend === null ? '' : t('kg') + t('perWeek')} />
           </View>
+          {pace && profile?.targetKg != null && (
+            <View style={styles.goalRow}>
+              <Icon name="flag.checkered" size={16} color={colors.accent} />
+              <Text style={styles.goalText}>
+                {t('targetWeight')}: {profile.targetKg.toFixed(1)} {t('kg')} · {MONTHS[lang][pace.eta.getMonth()]} {pace.eta.getFullYear()} ·{' '}
+                {planned >= 0 ? '+' : '−'}
+                {Math.abs(planned).toFixed(2)} {t('kg')}
+                {t('perWeek')}
+              </Text>
+            </View>
+          )}
           {weights.length >= 2 ? <WeightChart points={weights.slice(-30)} /> : <Text style={styles.hint}>{t('noWeights')}</Text>}
           <View style={styles.tip}>
             <Text style={styles.tipText}>{t(tip)}</Text>
@@ -175,6 +189,8 @@ const styles = StyleSheet.create({
   statValue: { color: colors.text, fontSize: 22, fontWeight: '700', marginTop: 4, fontVariant: ['tabular-nums'] },
   statUnit: { color: colors.textDim, fontSize: 12, fontWeight: '600' },
   hint: { color: colors.textDim, fontSize: 14 },
+  goalRow: { flexDirection: 'row', alignItems: 'center', gap: 8 },
+  goalText: { flex: 1, color: colors.textDim, fontSize: 13, fontWeight: '600', fontVariant: ['tabular-nums'] },
   tip: { backgroundColor: colors.surfaceHigh, borderRadius: radius.md, padding: space.md },
   tipText: { color: colors.text, fontSize: 14, lineHeight: 20 },
   bars: { flexDirection: 'row', gap: 8, height: 162, alignItems: 'flex-end' },
