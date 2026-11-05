@@ -1,6 +1,8 @@
 # TrackYSF — Track Yourself
 
-Personal iOS calorie & macro tracker. Snap a meal, optionally add what's inside and how many grams, and Gemini estimates calories, protein, carbs and fat per component. Adjust grams, add to your diary in one tap.
+![iOS](https://img.shields.io/badge/iOS-supported-black) ![Android](https://img.shields.io/badge/Android-supported-3DDC84) ![Expo SDK 58](https://img.shields.io/badge/Expo-SDK%2058-000020)
+
+Personal calorie & macro tracker for **iOS and Android**. Snap a meal, optionally add what's inside and how many grams, and Gemini estimates calories, protein, carbs and fat per component. Adjust grams, add to your diary in one tap.
 
 ## Features
 - **Onboarding**: animated ruler sliders for age / height / weight, activity, goal, **target weight and timeframe**. The app checks whether the pace is realistic (fat loss ≤0.75 % bodyweight/week, lean gain ≤0.5 kg/week), warns when it isn't and offers a realistic timeframe. Daily kcal + macros follow from Mifflin-St Jeor and the chosen pace (with a safe calorie floor).
@@ -18,6 +20,13 @@ Personal iOS calorie & macro tracker. Snap a meal, optionally add what's inside 
 - **Barcode scanner** (Open Food Facts), **saved meals**, **copy a meal from yesterday**.
 - **Water** (≈35 ml/kg target) and **extra activity / cardio** (Compendium METs, net kcal added to the day's budget).
 - **Reminders** (meals, weigh-ins, workout days, water) and **JSON backup / restore**.
+- **Progress**: weight log (0.1 kg ruler), smoothed chart, weekly trend with guidance, 7-day calorie bars and averages.
+- **Settings**: AZ / EN interface, targets, profile, Gemini API key (stored in the iOS Keychain / Android Keystore), erase data.
+- Everything is stored locally in SQLite. No server, no account.
+
+## Install
+- **Android**: download `TrackYSF.apk` from the latest [Release](../../releases) or from the *Build Android APK* workflow run, open it on the phone and allow "install unknown apps" once.
+- **iOS**: download `TrackYSF.ipa` and install it with SideStore or AltStore (see *Build the IPA* below).
 
 ## Gemini API key (free, bring your own)
 TrackYSF has no server and ships **no API key**. Each user adds their own free key:
@@ -25,10 +34,7 @@ TrackYSF has no server and ships **no API key**. Each user adds their own free k
 2. Create an API key.
 3. In the app: **Settings → Gemini API key**, paste, **Test key**.
 
-The key is stored only on the device (iOS Keychain). Free-tier limits apply (check them in AI Studio). Everything except AI analysis works without a key.
-- **Progress**: weight log (0.1 kg ruler), smoothed chart, weekly trend with guidance, 7-day calorie bars and averages.
-- **Settings**: AZ / EN interface, targets, profile, Gemini API key (stored in the iOS Keychain), erase data.
-- Everything is stored locally in SQLite. No server, no account.
+The key is stored only on the device (iOS Keychain / Android Keystore). Free-tier limits apply (check them in AI Studio). Everything except AI analysis works without a key.
 
 ## Stack
 Expo SDK 58 (React Native 0.88, TypeScript), Expo Router with native tabs, Reanimated 4, expo-sqlite, expo-secure-store, react-native-svg.
@@ -37,7 +43,7 @@ AI: `gemini-3.1-flash-lite` with automatic fallback to `gemini-3.5-flash-lite` w
 ## Develop (Windows, no Mac needed)
 ```bash
 npm install
-npx expo start          # scan the QR code with the iPhone camera → opens in Expo Go
+npx expo start          # iPhone: scan the QR with the camera; Android: scan it in the Expo Go app
 npx tsc --noEmit        # typecheck
 ```
 Put your key in `.env.local` (gitignored) for development:
