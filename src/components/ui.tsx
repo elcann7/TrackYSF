@@ -1,8 +1,10 @@
 import * as Haptics from 'expo-haptics';
 import { SymbolView, type SFSymbol } from 'expo-symbols';
+import { ANDROID_FALLBACK_ICON, ANDROID_ICONS } from '../lib/androidIcons';
 import { useEffect, useRef, useState, type ReactNode } from 'react';
 import {
   ActivityIndicator,
+  Platform,
   Pressable,
   StyleSheet,
   Text,
@@ -115,6 +117,10 @@ export function Icon({
   color?: string;
   weight?: 'regular' | 'medium' | 'semibold' | 'bold';
 }) {
+  if (Platform.OS !== 'ios') {
+    // SF Symbols exist only on Apple platforms; map to Material Symbols elsewhere.
+    return <SymbolView name={{ android: ANDROID_ICONS[name] ?? ANDROID_FALLBACK_ICON, web: ANDROID_ICONS[name] ?? ANDROID_FALLBACK_ICON }} size={size} tintColor={color} style={{ width: size, height: size }} />;
+  }
   return <SymbolView name={name} size={size} tintColor={color} weight={weight} resizeMode="scaleAspectFit" style={{ width: size, height: size }} />;
 }
 

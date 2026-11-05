@@ -50,6 +50,12 @@ GitHub Actions → **Build unsigned IPA** → *Run workflow* (or push a `v*` tag
 The IPA is unsigned; install with **SideStore** or **AltStore** using your Apple ID. With a free Apple ID the app must be refreshed every 7 days.
 The release build does not contain your API key: enter it once in Settings.
 
+## Build the Android APK
+GitHub Actions → **Build Android APK** → *Run workflow* (or push a `v*` tag to attach it to a Release).
+Download `TrackYSF.apk` from the run's artifacts, copy it to the phone and open it (allow "install unknown apps" once).
+The APK is signed with the debug key, so it is for sideloading, not the Play Store. Each user enters their own Gemini key in Settings.
+Icons: SF Symbols are iOS-only, so `src/lib/androidIcons.ts` maps every icon to a Material Symbol for Android; add an entry there when you use a new icon.
+
 ## Structure
 ```
 src/app/            routes (Expo Router)
